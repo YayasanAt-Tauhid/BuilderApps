@@ -28,13 +28,18 @@ DeepSeek V4 Flash → DO → R2/D1), file browse, export zip, usage metering.
 
 ## Known issues / follow-ups
 
-- Live token streaming via WebSocket is DISABLED. WS upgrades cannot be returned
-  through a SvelteKit `+server.ts` handler on adapter-cloudflare (the 101/webSocket
-  response is dropped → 500). The chat page now POLLS generation status and reloads
-  the persisted assistant message on completion (reliable, no live tokens).
-  To restore streaming: connect the browser directly to the backend worker's DO
-  (separate origin → use a short-lived query-param token, since the session cookie
-  is scoped to the app origin), or stream via an SSE ReadableStream proxied from the DO.
+- Live token streaming: IMPLEMENTED via SSE (not WebSocket). The DO relays generation
+  tokens through `/subscribe`; the app worker proxies it at GET
+  `/api/v1/projects/:id/generations/:gid/stream`; the chat page parses the SSE stream and
+  renders tokens live, with a polling fallback. Generation still runs via DO `/start`
+  (waitUntil) so it always completes + persists regardless of the client connection.
+  (WebSocket upgrades cannot be returned through a SvelteKit `+server.ts` on
+  adapter-cloudflare — that approach was dropped. Forwarding a DO stub stream also
+  requires `stub.fetch.bind(stub)`, else "Illegal invocation".)
+- Preview now inlines local CSS/JS into the served index.html and uses a sandboxed CSP
+  that permits inline styles/scripts + https CDNs, so previews render with styling.
+  Verified in a real browser: live streaming reaches Done; preview shows styled elements;
+  0 console errors.
 - Production-only bug fixed: Workers caps PBKDF2 at 100_000 iterations (was 600_000).
 - Production-only bug fixed: the hand-rolled CSP `script-src 'self'` blocked SvelteKit's
   inline hydration bootstrap → the page never hydrated (Send had no handler, no spinner,

@@ -1,8 +1,14 @@
 import { eq, and, isNull } from 'drizzle-orm';
 import { createDb } from '../../../src/lib/server/db';
 import { generations, generatedFiles, messages, projects } from '../../../src/lib/server/db/schema';
-import { streamChat, estimateTokens, DEFAULT_MODEL } from '../../../src/lib/server/ai';
-import { parseGeneratedFiles } from '../../../src/lib/server/ai/parser';
+import {
+	chatWithTools,
+	estimateTokens,
+	DEFAULT_MODEL,
+	type ToolDefinition,
+	type AgentMessage
+} from '../../../src/lib/server/ai';
+import { sanitizePath } from '../../../src/lib/server/ai/parser';
 import { fileKey, putFile, getFileText, contentHash } from '../../../src/lib/server/storage/r2';
 import { recordUsage } from '../../../src/lib/server/usage';
 import { ulid } from '../../../src/lib/utils/ulid';
@@ -17,41 +23,69 @@ interface StartJob {
 	model?: string;
 }
 
-/** Used for the initial (create) generation. */
-const CREATE_SYSTEM_PROMPT = `You are BuilderPro, an expert full-stack engineer. Given a description,
-generate a complete, runnable project. Output ONLY files, each delimited exactly like this:
+const AGENT_SYSTEM_PROMPT = `You are BuilderPro, an expert full-stack engineer. You have tools to read and write project files.
 
-=== FILE: relative/path/to/file.ext ===
-<file contents>
-=== END FILE ===
+For a NEW project (empty file list): write every file needed for a complete, runnable app.
+For an UPDATE: call list_files first, read only the files you need, then write only the files that changed. Never rewrite a file that doesn't need to change.
 
-Rules:
-- Use forward slashes in paths; never use absolute paths or "..".
-- Emit every file the project needs.
-- For a previewable frontend, make index.html self-contained: put CSS in an inline <style>
-  tag and JS in an inline <script> tag inside index.html (avoid external local files), so it
-  renders correctly in a sandboxed preview. A CDN (e.g. Tailwind Play CDN) is acceptable.
-- Do not wrap files in markdown code fences. Brief prose between blocks is allowed but ignored.`;
-
-/** Used for follow-up (update) generations. The current files are included in the user message. */
-const UPDATE_SYSTEM_PROMPT = `You are BuilderPro, an expert full-stack engineer. You are updating an existing project.
-
-The current project files are shown in the user message. Make ONLY the changes the user requests.
-
-Output ONLY the files that need to be ADDED or MODIFIED, using this exact format:
-
-=== FILE: relative/path/to/file.ext ===
-<new file contents>
-=== END FILE ===
-
-To delete a file, emit:
-=== DELETE: relative/path/to/file.ext ===
-
-Rules:
-- Files you do not mention will remain unchanged.
+Rules for files you write:
 - Use forward slashes; no absolute paths or "..".
-- For index.html: keep CSS in an inline <style> tag and JS in an inline <script> tag.
-- No markdown code fences. Brief prose between blocks is allowed but ignored.`;
+- For index.html: keep CSS in an inline <style> tag and JS in an inline <script> tag (no external local files); a CDN (e.g. Tailwind Play CDN) is acceptable.
+- Write the complete, final file content — not diffs or partial snippets.`;
+
+const FILE_TOOLS: ToolDefinition[] = [
+	{
+		type: 'function',
+		function: {
+			name: 'list_files',
+			description: 'List all files currently in the project.',
+			parameters: { type: 'object', properties: {}, required: [] }
+		}
+	},
+	{
+		type: 'function',
+		function: {
+			name: 'read_file',
+			description: 'Read the full content of a project file.',
+			parameters: {
+				type: 'object',
+				properties: {
+					path: { type: 'string', description: 'Relative file path' }
+				},
+				required: ['path']
+			}
+		}
+	},
+	{
+		type: 'function',
+		function: {
+			name: 'write_file',
+			description: 'Create or overwrite a file with complete new content.',
+			parameters: {
+				type: 'object',
+				properties: {
+					path: { type: 'string', description: 'Relative file path' },
+					content: { type: 'string', description: 'Complete file content' }
+				},
+				required: ['path', 'content']
+			}
+		}
+	},
+	{
+		type: 'function',
+		function: {
+			name: 'delete_file',
+			description: 'Delete a file from the project.',
+			parameters: {
+				type: 'object',
+				properties: {
+					path: { type: 'string', description: 'Relative file path' }
+				},
+				required: ['path']
+			}
+		}
+	}
+];
 
 const enc = new TextEncoder();
 
@@ -67,10 +101,19 @@ interface Live {
 	};
 }
 
-interface ExistingFile {
+// Lightweight metadata loaded from D1 — no R2 content fetch until the model asks.
+interface FileMeta {
 	path: string;
-	content: string;
 	r2Key: string;
+	sizeBytes: number;
+	hash: string;
+}
+
+// Record to persist at the end of a generation.
+interface FileRecord {
+	path: string;
+	content: string | null; // null = reuse existing r2Key (no upload)
+	r2Key: string | null; // null = compute new key after upload
 	sizeBytes: number;
 	hash: string;
 }
@@ -80,6 +123,10 @@ interface ExistingFile {
  * SQLite-backed Durable Object. The app worker triggers `/start` (fire-and-forget via
  * waitUntil, so generation always completes + persists) and clients attach to `/subscribe`
  * to receive live token events over Server-Sent Events.
+ *
+ * Generation uses an agentic tool-use loop so the model only reads the files it needs
+ * and writes only the files that change — token cost is proportional to the edit, not
+ * the total project size.
  */
 export class RealtimeHub {
 	private live = new Map<string, Live>();
@@ -135,8 +182,6 @@ export class RealtimeHub {
 		const writer = writable.getWriter();
 
 		if (!live) {
-			// Generation not active here (already finished + cleaned up, or never started):
-			// tell the client to fall back to polling.
 			writer.write(this.sse('fallback', { gid })).catch(() => {});
 			writer.close().catch(() => {});
 			return new Response(readable, { headers });
@@ -155,39 +200,6 @@ export class RealtimeHub {
 		return new Response(readable, { headers });
 	}
 
-	/** Load all files from the previous generation version to use as context for updates. */
-	private async loadExistingFiles(
-		db: ReturnType<typeof createDb>,
-		projectId: string,
-		version: number
-	): Promise<ExistingFile[]> {
-		const rows = await db
-			.select()
-			.from(generatedFiles)
-			.where(
-				and(
-					eq(generatedFiles.projectId, projectId),
-					eq(generatedFiles.version, version),
-					isNull(generatedFiles.deletedAt)
-				)
-			);
-
-		const result: ExistingFile[] = [];
-		for (const row of rows) {
-			const content = await getFileText(this.env.BUCKET, row.r2Key);
-			if (content !== null) {
-				result.push({
-					path: row.path,
-					content,
-					r2Key: row.r2Key,
-					sizeBytes: row.sizeBytes,
-					hash: row.contentHash
-				});
-			}
-		}
-		return result;
-	}
-
 	private async runGeneration(job: StartJob): Promise<void> {
 		const live = this.live.get(job.generationId)!;
 		const db = createDb(this.env.DB);
@@ -198,122 +210,185 @@ export class RealtimeHub {
 		}
 
 		try {
-			// For follow-up generations load existing files so the model sees the current state.
-			const isUpdate = job.version > 1;
-			let existingFiles: ExistingFile[] = [];
-			if (isUpdate) {
-				existingFiles = await this.loadExistingFiles(db, job.projectId, job.version - 1);
+			// Load file metadata from D1 only (no R2 reads yet — content is fetched lazily).
+			const prevMeta = new Map<string, FileMeta>();
+			if (job.version > 1) {
+				const rows = await db
+					.select()
+					.from(generatedFiles)
+					.where(
+						and(
+							eq(generatedFiles.projectId, job.projectId),
+							eq(generatedFiles.version, job.version - 1),
+							isNull(generatedFiles.deletedAt)
+						)
+					);
+				for (const row of rows) {
+					prevMeta.set(row.path, {
+						path: row.path,
+						r2Key: row.r2Key,
+						sizeBytes: row.sizeBytes,
+						hash: row.contentHash
+					});
+				}
 			}
 
-			const systemPrompt =
-				isUpdate && existingFiles.length > 0 ? UPDATE_SYSTEM_PROMPT : CREATE_SYSTEM_PROMPT;
+			// In-session content cache (files read or written this run).
+			const vfsContent = new Map<string, string>();
+			// Files written by the model in this generation (path → new content).
+			const writtenFiles = new Map<string, string>();
+			// Files explicitly deleted by the model.
+			const deletedPaths = new Set<string>();
+			// Fragments assembled into the assistant message stored in D1.
+			const contentParts: string[] = [];
 
-			let userContent: string;
-			if (isUpdate && existingFiles.length > 0) {
-				const fileBlocks = existingFiles
-					.map((f) => `=== FILE: ${f.path} ===\n${f.content}\n=== END FILE ===`)
-					.join('\n\n');
-				userContent = `CURRENT PROJECT FILES:\n\n${fileBlocks}\n\nUSER REQUEST:\n${job.prompt}`;
-			} else {
-				userContent = job.prompt;
+			const agentMessages: AgentMessage[] = [
+				{ role: 'system', content: AGENT_SYSTEM_PROMPT },
+				{ role: 'user', content: job.prompt }
+			];
+
+			// Agentic tool-use loop — each iteration is one model round-trip.
+			const MAX_ITERS = 20;
+
+			for (let iter = 0; iter < MAX_ITERS; iter++) {
+				const response = await chatWithTools({
+					apiKey: this.env.OPENROUTER_API_KEY,
+					model: job.model ?? DEFAULT_MODEL,
+					messages: agentMessages,
+					tools: FILE_TOOLS
+				});
+
+				agentMessages.push(response);
+				if (response.content) contentParts.push(response.content);
+
+				if (!response.tool_calls?.length) break; // no more tools → done
+
+				const toolResults: AgentMessage[] = [];
+
+				for (const tc of response.tool_calls) {
+					let args: Record<string, unknown>;
+					try {
+						args = JSON.parse(tc.function.arguments) as Record<string, unknown>;
+					} catch {
+						args = {};
+					}
+
+					let result: string;
+
+					switch (tc.function.name) {
+						case 'list_files': {
+							// Return the effective current file list (prev + written − deleted).
+							const currentPaths = [
+								...[...prevMeta.keys()].filter(
+									(p) => !deletedPaths.has(p) && !writtenFiles.has(p)
+								),
+								...writtenFiles.keys()
+							];
+							result = JSON.stringify(currentPaths.map((p) => ({ path: p })));
+							break;
+						}
+
+						case 'read_file': {
+							const path = sanitizePath(String(args.path ?? ''));
+							if (vfsContent.has(path)) {
+								// Already loaded or written this session.
+								result = vfsContent.get(path)!;
+							} else {
+								const meta = prevMeta.get(path);
+								if (meta) {
+									// Lazy load from R2 only when the model actually asks.
+									const content = await getFileText(this.env.BUCKET, meta.r2Key);
+									if (content !== null) {
+										vfsContent.set(path, content);
+										result = content;
+									} else {
+										result = JSON.stringify({ error: 'File content unavailable' });
+									}
+								} else {
+									result = JSON.stringify({ error: `File not found: ${path}` });
+								}
+							}
+							break;
+						}
+
+						case 'write_file': {
+							const path = sanitizePath(String(args.path ?? ''));
+							const content = String(args.content ?? '');
+							if (!path) {
+								result = JSON.stringify({ error: 'Invalid path' });
+								break;
+							}
+							writtenFiles.set(path, content);
+							vfsContent.set(path, content);
+							deletedPaths.delete(path); // un-delete if path is reused
+
+							// Emit file block in the delimiter format the client already parses.
+							const block = `=== FILE: ${path} ===\n${content}\n=== END FILE ===\n`;
+							live.buffer += block;
+							this.writeAll(live, this.sse('token', { content: block }));
+							contentParts.push(block);
+
+							result = JSON.stringify({ ok: true });
+							break;
+						}
+
+						case 'delete_file': {
+							const path = sanitizePath(String(args.path ?? ''));
+							deletedPaths.add(path);
+							vfsContent.delete(path);
+							writtenFiles.delete(path);
+							result = JSON.stringify({ ok: true });
+							break;
+						}
+
+						default:
+							result = JSON.stringify({ error: 'Unknown tool' });
+					}
+
+					toolResults.push({ role: 'tool', tool_call_id: tc.id, content: result });
+				}
+
+				agentMessages.push(...toolResults);
 			}
 
-			let full = '';
-			for await (const delta of streamChat({
-				apiKey: this.env.OPENROUTER_API_KEY,
-				model: job.model ?? DEFAULT_MODEL,
-				messages: [
-					{ role: 'system', content: systemPrompt },
-					{ role: 'user', content: userContent }
-				]
-			})) {
-				if (delta.done) break;
-				full += delta.content;
-				live.buffer += delta.content;
-				this.writeAll(live, this.sse('token', { content: delta.content }));
-			}
-
-			const { files: newFiles, deletedPaths } = parseGeneratedFiles(full);
 			const ts = Date.now();
+			const assistantContent = contentParts.join('\n');
 
-			// For updates: merge the model's output with the existing file set.
-			// - Files the model returned: new or modified (need R2 upload).
-			// - Files the model omitted: carry forward unchanged (reuse existing R2 key).
-			// - Files in deletedPaths: removed from the project.
-			type FileRecord = {
-				path: string;
-				content: string | null; // null = reuse existing r2Key, no upload needed
-				r2Key: string | null; // null = compute new key after upload
-				sizeBytes: number;
-				hash: string;
-			};
+			// Build the final file set for this version:
+			//  - Unchanged files from the previous version (reuse R2 key — no upload).
+			//  - New / modified files (upload to R2 under the new version key).
+			//  - Deleted files are simply omitted.
+			const filesToStore: FileRecord[] = [];
 
-			let filesToStore: FileRecord[];
+			for (const [path, meta] of prevMeta) {
+				if (deletedPaths.has(path) || writtenFiles.has(path)) continue;
+				filesToStore.push({
+					path,
+					content: null,
+					r2Key: meta.r2Key,
+					sizeBytes: meta.sizeBytes,
+					hash: meta.hash
+				});
+			}
 
-			if (isUpdate && existingFiles.length > 0) {
-				const newByPath = new Map(newFiles.map((f) => [f.path, f]));
-				const deletedSet = new Set(deletedPaths);
-				const merged = new Map<string, FileRecord>();
-
-				for (const ef of existingFiles) {
-					if (deletedSet.has(ef.path)) continue;
-					const updated = newByPath.get(ef.path);
-					if (updated) {
-						// Modified — upload new content
-						merged.set(ef.path, {
-							path: ef.path,
-							content: updated.content,
-							r2Key: null,
-							sizeBytes: enc.encode(updated.content).byteLength,
-							hash: contentHash(updated.content)
-						});
-					} else {
-						// Unchanged — reuse existing R2 object, no upload
-						merged.set(ef.path, {
-							path: ef.path,
-							content: null,
-							r2Key: ef.r2Key,
-							sizeBytes: ef.sizeBytes,
-							hash: ef.hash
-						});
-					}
-				}
-
-				// Newly added files (paths not in the previous version)
-				for (const nf of newFiles) {
-					if (!merged.has(nf.path)) {
-						merged.set(nf.path, {
-							path: nf.path,
-							content: nf.content,
-							r2Key: null,
-							sizeBytes: enc.encode(nf.content).byteLength,
-							hash: contentHash(nf.content)
-						});
-					}
-				}
-
-				filesToStore = [...merged.values()];
-			} else {
-				filesToStore = newFiles.map((f) => ({
-					path: f.path,
-					content: f.content,
+			for (const [path, content] of writtenFiles) {
+				filesToStore.push({
+					path,
+					content,
 					r2Key: null,
-					sizeBytes: enc.encode(f.content).byteLength,
-					hash: contentHash(f.content)
-				}));
+					sizeBytes: enc.encode(content).byteLength,
+					hash: contentHash(content)
+				});
 			}
 
 			for (const file of filesToStore) {
 				let key: string;
 				if (file.content !== null) {
-					// New or modified: upload to R2 under the current version
 					key = fileKey(job.projectId, job.version, file.path);
 					await putFile(this.env.BUCKET, key, file.content);
 				} else {
-					// Unchanged: point to the existing R2 object
 					key = file.r2Key!;
 				}
-
 				await db.insert(generatedFiles).values({
 					id: ulid(),
 					projectId: job.projectId,
@@ -329,12 +404,21 @@ export class RealtimeHub {
 				});
 			}
 
+			// Token estimates: input = system + user + all tool results; output = written content.
+			const inputTokens =
+				estimateTokens(AGENT_SYSTEM_PROMPT) +
+				estimateTokens(job.prompt) +
+				agentMessages
+					.filter((m) => m.role === 'tool')
+					.reduce((n, m) => n + estimateTokens('content' in m ? String(m.content) : ''), 0);
+			const outputTokens = estimateTokens(assistantContent);
+
 			await db.insert(messages).values({
 				id: ulid(),
 				projectId: job.projectId,
 				role: 'assistant',
-				content: full,
-				tokenCount: estimateTokens(full),
+				content: assistantContent,
+				tokenCount: outputTokens,
 				modelUsed: job.model ?? DEFAULT_MODEL,
 				generationId: job.generationId,
 				createdAt: ts,
@@ -342,10 +426,7 @@ export class RealtimeHub {
 				deletedAt: null
 			});
 
-			await recordUsage(db, job.userId, {
-				input: estimateTokens(userContent) + estimateTokens(systemPrompt),
-				output: estimateTokens(full)
-			});
+			await recordUsage(db, job.userId, { input: inputTokens, output: outputTokens });
 
 			await db
 				.update(generations)
@@ -356,11 +437,7 @@ export class RealtimeHub {
 				.set({ status: 'ready', updatedAt: ts })
 				.where(eq(projects.id, job.projectId));
 
-			live.result = {
-				status: 'succeeded',
-				version: job.version,
-				fileCount: filesToStore.length
-			};
+			live.result = { status: 'succeeded', version: job.version, fileCount: filesToStore.length };
 			live.finished = true;
 			this.writeAll(live, this.sse('done', live.result));
 			for (const w of live.writers) w.close().catch(() => {});

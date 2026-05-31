@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { m } from '$lib/paraglide/messages';
+	import GeneratedFiles from '$lib/components/GeneratedFiles.svelte';
 	import type { PageData } from './$types';
 
 	let { data }: { data: PageData } = $props();
@@ -156,14 +157,18 @@
 				class="rounded-md p-3 text-sm {msg.role === 'user' ? 'bg-muted' : 'border bg-background'}"
 			>
 				<span class="mb-1 block text-xs font-medium text-muted-foreground">{msg.role}</span>
-				<pre class="whitespace-pre-wrap font-mono text-xs">{msg.content}</pre>
+				{#if msg.role === 'assistant'}
+					<GeneratedFiles text={msg.content} />
+				{:else}
+					<pre class="whitespace-pre-wrap font-sans text-sm">{msg.content}</pre>
+				{/if}
 			</div>
 		{/each}
 
 		{#if streaming}
 			<div class="rounded-md border bg-background p-3 text-sm">
 				<span class="mb-1 block text-xs font-medium text-muted-foreground">assistant</span>
-				<pre class="whitespace-pre-wrap font-mono text-xs">{streaming}</pre>
+				<GeneratedFiles text={streaming} live />
 			</div>
 		{/if}
 

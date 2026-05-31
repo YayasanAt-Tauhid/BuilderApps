@@ -79,7 +79,6 @@ export const POST: RequestHandler = async (event) => {
 				projectId: project.id,
 				userId: user.id,
 				version: generation.version,
-				prevVersion: Number(maxVersion) > 0 ? Number(maxVersion) : null,
 				prompt: result.data.content,
 				model: DEFAULT_MODEL
 			})

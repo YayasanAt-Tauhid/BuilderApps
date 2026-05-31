@@ -1,9 +1,10 @@
-import { eq } from 'drizzle-orm';
+import { eq, asc, and } from 'drizzle-orm';
 import { createDb } from '../../../src/lib/server/db';
 import { generations, generatedFiles, messages, projects } from '../../../src/lib/server/db/schema';
 import { streamChat, estimateTokens, DEFAULT_MODEL } from '../../../src/lib/server/ai';
-import { parseGeneratedFiles } from '../../../src/lib/server/ai/parser';
-import { fileKey, putFile, contentHash } from '../../../src/lib/server/storage/r2';
+import { parseOutput, applyPatch } from '../../../src/lib/server/ai/parser';
+import { buildEditPrompt, PROMPT_NEW } from '../../../src/lib/server/ai/prompts';
+import { fileKey, putFile, getFileText, contentHash } from '../../../src/lib/server/storage/r2';
 import { recordUsage } from '../../../src/lib/server/usage';
 import { ulid } from '../../../src/lib/utils/ulid';
 import type { Env } from '../../../src/lib/server/env';
@@ -13,24 +14,11 @@ interface StartJob {
 	projectId: string;
 	userId: string;
 	version: number;
+	/** null = first generation; otherwise the version to use as edit base. */
+	prevVersion: number | null;
 	prompt: string;
 	model?: string;
 }
-
-const SYSTEM_PROMPT = `You are BuilderPro, an expert full-stack engineer. Given a description,
-generate a complete, runnable project. Output ONLY files, each delimited exactly like this:
-
-=== FILE: relative/path/to/file.ext ===
-<file contents>
-=== END FILE ===
-
-Rules:
-- Use forward slashes in paths; never use absolute paths or "..".
-- Emit every file the project needs.
-- For a previewable frontend, make index.html self-contained: put CSS in an inline <style>
-  tag and JS in an inline <script> tag inside index.html (avoid external local files), so it
-  renders correctly in a sandboxed preview. A CDN (e.g. Tailwind Play CDN) is acceptable.
-- Do not wrap files in markdown code fences. Brief prose between blocks is allowed but ignored.`;
 
 const enc = new TextEncoder();
 
@@ -48,9 +36,8 @@ interface Live {
 
 /**
  * Per-project generation runner + live SSE relay (PRD §11.4).
- * SQLite-backed Durable Object. The app worker triggers `/start` (fire-and-forget via
- * waitUntil, so generation always completes + persists) and clients attach to `/subscribe`
- * to receive live token events over Server-Sent Events.
+ * SQLite-backed Durable Object. The app worker triggers /start (fire-and-forget via
+ * waitUntil) and clients attach to /subscribe for live token events.
  */
 export class RealtimeHub {
 	private live = new Map<string, Live>();
@@ -72,16 +59,13 @@ export class RealtimeHub {
 	}
 
 	private writeAll(live: Live, chunk: Uint8Array): void {
-		for (const w of live.writers) {
-			w.write(chunk).catch(() => live.writers.delete(w));
-		}
+		for (const w of live.writers) w.write(chunk).catch(() => live.writers.delete(w));
 	}
 
 	private async handleStart(request: Request): Promise<Response> {
 		const job = (await request.json()) as StartJob;
 		if (!this.live.has(job.generationId)) {
 			this.live.set(job.generationId, { buffer: '', writers: new Set(), finished: false });
-			// Awaited so the DO stays alive for the whole run (caller used waitUntil).
 			await this.runGeneration(job);
 		}
 		return new Response('ok');
@@ -95,7 +79,6 @@ export class RealtimeHub {
 			'x-accel-buffering': 'no'
 		};
 
-		// Wait briefly for /start to register the generation (it runs near-simultaneously).
 		let live = this.live.get(gid);
 		for (let i = 0; i < 20 && !live; i++) {
 			await new Promise((r) => setTimeout(r, 150));
@@ -106,14 +89,11 @@ export class RealtimeHub {
 		const writer = writable.getWriter();
 
 		if (!live) {
-			// Generation not active here (already finished + cleaned up, or never started):
-			// tell the client to fall back to polling.
 			writer.write(this.sse('fallback', { gid })).catch(() => {});
 			writer.close().catch(() => {});
 			return new Response(readable, { headers });
 		}
 
-		// Replay what has streamed so far.
 		if (live.buffer) writer.write(this.sse('token', { content: live.buffer })).catch(() => {});
 
 		if (live.finished && live.result) {
@@ -136,12 +116,50 @@ export class RealtimeHub {
 		}
 
 		try {
+			const isEdit = job.prevVersion !== null;
+
+			// ── 1. Load existing files for edit mode ──────────────────────────────
+			const existingFiles = new Map<string, string>();
+			if (isEdit) {
+				const prevRows = await db
+					.select()
+					.from(generatedFiles)
+					.where(
+						and(
+							eq(generatedFiles.projectId, job.projectId),
+							eq(generatedFiles.version, job.prevVersion!)
+						)
+					);
+				await Promise.all(
+					prevRows.map(async (row) => {
+						const text = await getFileText(this.env.BUCKET, row.r2Key);
+						if (text !== null) existingFiles.set(row.path as string, text);
+					})
+				);
+			}
+
+			// ── 2. Load conversation history (last 20 messages, skip current) ──────
+			const history = await db
+				.select()
+				.from(messages)
+				.where(eq(messages.projectId, job.projectId))
+				.orderBy(asc(messages.createdAt));
+			const historyMsgs = history
+				.slice(0, -1) // exclude the user message we just inserted
+				.slice(-20)
+				.map((m) => ({ role: m.role as 'user' | 'assistant', content: m.content }));
+
+			// ── 3. Choose system prompt ───────────────────────────────────────────
+			const systemPrompt = isEdit ? buildEditPrompt(existingFiles) : PROMPT_NEW;
+
+			// ── 4. Stream generation ──────────────────────────────────────────────
 			let full = '';
 			for await (const delta of streamChat({
 				apiKey: this.env.OPENROUTER_API_KEY,
 				model: job.model ?? DEFAULT_MODEL,
 				messages: [
-					{ role: 'system', content: SYSTEM_PROMPT },
+					{ role: 'system', content: systemPrompt },
+					...historyMsgs,
 					{ role: 'user', content: job.prompt }
 				]
 			})) {
@@ -151,21 +169,61 @@ export class RealtimeHub {
 				this.writeAll(live, this.sse('token', { content: delta.content }));
 			}
 
-			const files = parseGeneratedFiles(full);
-			const ts = Date.now();
+			// ── 5. Parse FILE + PATCH blocks ──────────────────────────────────────
+			const { files: newFiles, patches } = parseOutput(full);
+			const finalFiles = new Map(existingFiles);
 
-			for (const file of files) {
-				const key = fileKey(job.projectId, job.version, file.path);
-				await putFile(this.env.BUCKET, key, file.content);
+			for (const f of newFiles) finalFiles.set(f.path, f.content);
+
+			// Apply patches; collect failures for one fallback retry.
+			const failedPaths: string[] = [];
+			for (const patch of patches) {
+				const base = finalFiles.get(patch.path) ?? '';
+				const patched = applyPatch(base, patch);
+				if (patched !== null) {
+					finalFiles.set(patch.path, patched);
+				} else {
+					console.warn(`[hub] patch hunk not found: ${patch.path}`);
+					failedPaths.push(patch.path);
+				}
+			}
+
+			// ── 6. Fallback: retry failed files with full-rewrite prompt ──────────
+			if (failedPaths.length > 0) {
+				const retryPrompt =
+					`Rewrite these files in full (previous unified diff could not be applied):\n` +
+					failedPaths.join('\n') +
+					`\n\nOriginal request: ${job.prompt}`;
+				let retryFull = '';
+				for await (const delta of streamChat({
+					apiKey: this.env.OPENROUTER_API_KEY,
+					model: job.model ?? DEFAULT_MODEL,
+					messages: [
+						{ role: 'system', content: PROMPT_NEW },
+						{ role: 'user', content: retryPrompt }
+					]
+				})) {
+					if (delta.done) break;
+					retryFull += delta.content;
+				}
+				const { files: retryFiles } = parseOutput(retryFull);
+				for (const f of retryFiles) finalFiles.set(f.path, f.content);
+			}
+
+			// ── 7. Persist to R2 + D1 ─────────────────────────────────────────────
+			const ts = Date.now();
+			for (const [path, content] of finalFiles) {
+				const key = fileKey(job.projectId, job.version, path);
+				await putFile(this.env.BUCKET, key, content);
 				await db.insert(generatedFiles).values({
 					id: ulid(),
 					projectId: job.projectId,
 					generationId: job.generationId,
-					path: file.path,
+					path,
 					version: job.version,
 					r2Key: key,
-					sizeBytes: new TextEncoder().encode(file.content).byteLength,
-					contentHash: contentHash(file.content),
+					sizeBytes: enc.encode(content).byteLength,
+					contentHash: contentHash(content),
 					createdAt: ts,
 					updatedAt: ts,
 					deletedAt: null
@@ -186,7 +244,7 @@ export class RealtimeHub {
 			});
 
 			await recordUsage(db, job.userId, {
-				input: estimateTokens(job.prompt) + estimateTokens(SYSTEM_PROMPT),
+				input: estimateTokens(job.prompt) + estimateTokens(systemPrompt),
 				output: estimateTokens(full)
 			});
 
@@ -199,13 +257,12 @@ export class RealtimeHub {
 				.set({ status: 'ready', updatedAt: ts })
 				.where(eq(projects.id, job.projectId));
 
-			live.result = { status: 'succeeded', version: job.version, fileCount: files.length };
+			live.result = { status: 'succeeded', version: job.version, fileCount: finalFiles.size };
 			live.finished = true;
 			this.writeAll(live, this.sse('done', live.result));
 			for (const w of live.writers) w.close().catch(() => {});
 			this.scheduleCleanup(job.generationId);
 		} catch (err) {
-			// User-safe message only — never leak provider internals or PII (PRD §5 M4).
 			console.error('generation failed', err);
 			await this.fail(db, job, live, 'Generation failed. Please try again.');
 		}

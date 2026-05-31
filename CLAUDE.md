@@ -37,6 +37,7 @@ D1/KV/R2/Queue), set `OPENROUTER_API_KEY` on the backend worker, then `db:migrat
 **Two workers, one repo (this is the central design fact).** `@sveltejs/adapter-cloudflare`
 emits a `fetch`-only worker that cannot host a Durable Object, Queue consumer, or Cron handler.
 So:
+
 - **App worker** (`builderpro`, repo root) — SvelteKit SSR + `/api/v1/**`. Producer for `QUEUE`;
   holds a cross-script DO binding; holds NO secrets.
 - **Backend worker** (`builderpro-backend`, `workers/backend/`) — plain TS worker that OWNS the

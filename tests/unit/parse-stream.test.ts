@@ -11,7 +11,9 @@ describe('parseStream (live chat parser)', () => {
 		].join('\n');
 		const { intro, files } = parseStream(text);
 		expect(intro).toBe('Here is your project:');
-		expect(files).toEqual([{ path: 'index.html', content: '<h1>Hi</h1>', complete: true }]);
+		expect(files).toEqual([
+			{ path: 'index.html', content: '<h1>Hi</h1>', complete: true, isPatch: false }
+		]);
 	});
 
 	it('marks the trailing in-progress file as incomplete', () => {

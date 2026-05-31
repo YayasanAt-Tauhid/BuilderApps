@@ -6,6 +6,8 @@ export interface StreamFile {
 	path: string;
 	content: string;
 	complete: boolean;
+	/** true when this entry is a PATCH block (diff), not a full file. */
+	isPatch: boolean;
 }
 
 export interface ParsedStream {
@@ -13,8 +15,10 @@ export interface ParsedStream {
 	files: StreamFile[];
 }
 
-const FILE_RE = /^===\s*FILE:\s*(.+?)\s*===$/;
-const END_RE = /^===\s*END FILE\s*===$/;
+const FILE_START = /^===\s*FILE:\s*(.+?)\s*===$/;
+const FILE_END = /^===\s*END FILE\s*===$/;
+const PATCH_START = /^===\s*PATCH:\s*(.+?)\s*===$/;
+const PATCH_END = /^===\s*END PATCH\s*===$/;
 
 export function parseStream(text: string): ParsedStream {
 	const lines = text.split('\n');
@@ -24,34 +28,43 @@ export function parseStream(text: string): ParsedStream {
 	let buf: string[] = [];
 	let sawFile = false;
 
+	const pushCurrent = () => {
+		if (current) {
+			current.content = buf.join('\n');
+			files.push(current);
+		}
+	};
+
 	for (const line of lines) {
-		const start = line.match(FILE_RE);
-		if (start) {
-			if (current) {
-				current.content = buf.join('\n');
-				files.push(current);
-			}
-			current = { path: start[1], content: '', complete: false };
+		const fs = line.match(FILE_START);
+		if (fs) {
+			pushCurrent();
+			current = { path: fs[1], content: '', complete: false, isPatch: false };
 			buf = [];
 			sawFile = true;
 			continue;
 		}
-		if (END_RE.test(line)) {
-			if (current) {
-				current.content = buf.join('\n');
-				current.complete = true;
-				files.push(current);
-				current = null;
-				buf = [];
-			}
+		const ps = line.match(PATCH_START);
+		if (ps) {
+			pushCurrent();
+			current = { path: ps[1], content: '', complete: false, isPatch: true };
+			buf = [];
+			sawFile = true;
+			continue;
+		}
+		if ((FILE_END.test(line) || PATCH_END.test(line)) && current) {
+			current.content = buf.join('\n');
+			current.complete = true;
+			files.push(current);
+			current = null;
+			buf = [];
 			continue;
 		}
 		if (current) buf.push(line);
 		else if (!sawFile) intro.push(line);
-		// prose between completed files is ignored
 	}
 
-	// Trailing unterminated block = the file currently being written.
+	// Trailing unterminated block = file currently being written.
 	if (current) {
 		current.content = buf.join('\n');
 		files.push(current);

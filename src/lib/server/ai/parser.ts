@@ -1,61 +1,195 @@
-// Parses the model's streamed output into a set of generated files.
+// Parses the model's streamed output into generated files and/or unified diff patches.
 //
-// Contract (enforced by the system prompt): the model emits files delimited by
-// path markers, e.g.
+// Two output formats are supported (both can appear in the same generation):
 //
-//   === FILE: src/routes/+page.svelte ===
-//   <file content>
-//   === END FILE ===
+// 1. Full file (new file or full rewrite):
+//    === FILE: relative/path/to/file.ext ===
+//    <full file content>
+//    === END FILE ===
 //
-// Any prose outside FILE blocks is ignored (it is shown in chat but not written to R2).
+// 2. Unified diff patch (targeted edit):
+//    === PATCH: relative/path/to/file.ext ===
+//    @@ ... @@
+//     context line
+//    -removed line
+//    +added line
+//     context line
+//    === END PATCH ===
 
 export interface ParsedFile {
 	path: string;
 	content: string;
 }
 
-const FILE_RE = /^===\s*FILE:\s*(.+?)\s*===$/;
-const END_RE = /^===\s*END FILE\s*===$/;
+export interface Hunk {
+	/** Lines to find in the file: context + removed lines, in diff order. */
+	search: string[];
+	/** Replacement lines: context + added lines, in diff order. */
+	replace: string[];
+}
 
-export function parseGeneratedFiles(output: string): ParsedFile[] {
+export interface ParsedPatch {
+	path: string;
+	hunks: Hunk[];
+}
+
+export interface ParseResult {
+	files: ParsedFile[];
+	patches: ParsedPatch[];
+}
+
+const FILE_START = /^===\s*FILE:\s*(.+?)\s*===$/;
+const FILE_END = /^===\s*END FILE\s*===$/;
+const PATCH_START = /^===\s*PATCH:\s*(.+?)\s*===$/;
+const PATCH_END = /^===\s*END PATCH\s*===$/;
+const HUNK_HEAD = /^@@/;
+
+type Mode = 'none' | 'file' | 'patch';
+
+export function parseOutput(output: string): ParseResult {
 	const lines = output.split('\n');
 	const files: ParsedFile[] = [];
+	const patches: ParsedPatch[] = [];
+
+	let mode: Mode = 'none';
 	let currentPath: string | null = null;
-	let buf: string[] = [];
+	let fileBuf: string[] = [];
+
+	let patchHunks: Hunk[] = [];
+	let hunkSearch: string[] = [];
+	let hunkReplace: string[] = [];
+	let inHunk = false;
+
+	const flushFile = () => {
+		if (currentPath) files.push({ path: currentPath, content: fileBuf.join('\n') });
+		currentPath = null;
+		fileBuf = [];
+	};
+	const flushHunk = () => {
+		if (inHunk && (hunkSearch.length || hunkReplace.length))
+			patchHunks.push({ search: hunkSearch, replace: hunkReplace });
+		hunkSearch = [];
+		hunkReplace = [];
+		inHunk = false;
+	};
+	const flushPatch = () => {
+		flushHunk();
+		if (currentPath && patchHunks.length) patches.push({ path: currentPath, hunks: patchHunks });
+		currentPath = null;
+		patchHunks = [];
+	};
 
 	for (const line of lines) {
-		const startMatch = line.match(FILE_RE);
-		if (startMatch) {
-			// A new FILE marker implicitly closes any unterminated previous block.
-			if (currentPath !== null) {
-				files.push({ path: currentPath, content: buf.join('\n') });
-			}
-			currentPath = sanitizePath(startMatch[1]);
-			buf = [];
+		const fs = line.match(FILE_START);
+		if (fs) {
+			if (mode === 'file') flushFile();
+			if (mode === 'patch') flushPatch();
+			mode = 'file';
+			currentPath = sanitizePath(fs[1]);
+			fileBuf = [];
 			continue;
 		}
-		if (END_RE.test(line)) {
-			if (currentPath !== null) {
-				files.push({ path: currentPath, content: buf.join('\n') });
-				currentPath = null;
-				buf = [];
-			}
+		if (FILE_END.test(line) && mode === 'file') {
+			flushFile();
+			mode = 'none';
 			continue;
 		}
-		if (currentPath !== null) buf.push(line);
+
+		const ps = line.match(PATCH_START);
+		if (ps) {
+			if (mode === 'file') flushFile();
+			if (mode === 'patch') flushPatch();
+			mode = 'patch';
+			currentPath = sanitizePath(ps[1]);
+			patchHunks = [];
+			inHunk = false;
+			continue;
+		}
+		if (PATCH_END.test(line) && mode === 'patch') {
+			flushPatch();
+			mode = 'none';
+			continue;
+		}
+
+		if (mode === 'file') {
+			fileBuf.push(line);
+			continue;
+		}
+
+		if (mode === 'patch') {
+			if (HUNK_HEAD.test(line)) {
+				flushHunk();
+				inHunk = true;
+				continue;
+			}
+			if (!inHunk) continue;
+			if (line.startsWith('-')) {
+				hunkSearch.push(line.slice(1)); // removed → search only
+			} else if (line.startsWith('+')) {
+				hunkReplace.push(line.slice(1)); // added → replace only
+			} else {
+				const ctx = line.startsWith(' ') ? line.slice(1) : line;
+				hunkSearch.push(ctx); // context → both
+				hunkReplace.push(ctx);
+			}
+		}
 	}
 
-	// Flush a trailing unterminated block (stream may have been cut off).
-	if (currentPath !== null) {
-		files.push({ path: currentPath, content: buf.join('\n') });
-	}
+	if (mode === 'file') flushFile();
+	if (mode === 'patch') flushPatch();
 
-	// De-dupe by path — last write wins.
-	const byPath = new Map<string, string>();
-	for (const f of files) {
-		if (f.path) byPath.set(f.path, f.content);
+	const byPath = new Map(files.filter((f) => f.path).map((f) => [f.path, f.content]));
+	return {
+		files: [...byPath.entries()].map(([path, content]) => ({ path, content })),
+		patches
+	};
+}
+
+/**
+ * Apply all hunks of a patch to the given file content.
+ * Returns patched string, or null if any hunk cannot be located.
+ * Caller must handle null (e.g. fall back to full rewrite).
+ */
+export function applyPatch(original: string, patch: ParsedPatch): string | null {
+	let result = original;
+	for (const hunk of patch.hunks) {
+		const next = applyHunk(result, hunk);
+		if (next === null) return null;
+		result = next;
 	}
-	return [...byPath.entries()].map(([path, content]) => ({ path, content }));
+	return result;
+}
+
+function applyHunk(content: string, hunk: Hunk): string | null {
+	const lines = content.split('\n');
+	if (!hunk.search.length) return content + '\n' + hunk.replace.join('\n'); // pure insert at EOF
+
+	const start = findBlock(lines, hunk.search);
+	if (start === -1) return null;
+	return [
+		...lines.slice(0, start),
+		...hunk.replace,
+		...lines.slice(start + hunk.search.length)
+	].join('\n');
+}
+
+function findBlock(lines: string[], search: string[]): number {
+	for (const eq of [
+		(a: string, b: string) => a === b,
+		(a: string, b: string) => a.trimEnd() === b.trimEnd(),
+		(a: string, b: string) => a.trim() === b.trim()
+	]) {
+		outer: for (let i = 0; i <= lines.length - search.length; i++) {
+			for (let j = 0; j < search.length; j++) if (!eq(lines[i + j], search[j])) continue outer;
+			return i;
+		}
+	}
+	return -1;
+}
+
+/** Legacy — kept for backward compatibility. Prefer parseOutput(). */
+export function parseGeneratedFiles(output: string): ParsedFile[] {
+	return parseOutput(output).files;
 }
 
 /** Reject path traversal and absolute paths; normalize separators. */

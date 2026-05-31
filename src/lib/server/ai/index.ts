@@ -1,4 +1,6 @@
-import { parseSSE, type ChatDelta } from './stream';
+import { parseSSE, parseSSEWithTools, type ChatDelta, type AgentStreamEvent } from './stream';
+
+export type { AgentStreamEvent, ToolCallDelta } from './stream';
 
 // OpenRouter client (OpenAI-compatible). Called from the backend worker / Durable Object.
 // No SDK — plain fetch keeps the Worker bundle small and avoids Node-only code (PRD §10.1).
@@ -28,17 +30,12 @@ export class OpenRouterError extends Error {
 	}
 }
 
-/**
- * Opens a streaming chat completion and yields content deltas as they arrive.
- * The caller (RealtimeHub DO) relays these over WebSocket and accumulates the full text.
- */
 export async function* streamChat(opts: GenerateOptions): AsyncGenerator<ChatDelta, void, unknown> {
 	const res = await fetch(OPENROUTER_URL, {
 		method: 'POST',
 		headers: {
 			Authorization: `Bearer ${opts.apiKey}`,
 			'Content-Type': 'application/json',
-			// Optional OpenRouter attribution headers.
 			'HTTP-Referer': 'https://builderpro.app',
 			'X-Title': 'BuilderPro'
 		},
@@ -51,7 +48,6 @@ export async function* streamChat(opts: GenerateOptions): AsyncGenerator<ChatDel
 	});
 
 	if (!res.ok || !res.body) {
-		// Read a bounded amount of the error body; never surface raw provider internals to users.
 		const detail = await res.text().catch(() => '');
 		throw new OpenRouterError(
 			`OpenRouter request failed (${res.status}): ${detail.slice(0, 200)}`,
@@ -85,8 +81,8 @@ export interface ToolCall {
 }
 
 /**
- * Union of all message shapes accepted by the tool-use loop.
- * Matches the OpenAI function-calling wire format (used by OpenRouter).
+ * Union of all message shapes accepted by the agentic loop.
+ * Matches the OpenAI function-calling wire format used by OpenRouter.
  */
 export type AgentMessage =
 	| { role: 'system' | 'user'; content: string }
@@ -94,16 +90,18 @@ export type AgentMessage =
 	| { role: 'tool'; tool_call_id: string; content: string };
 
 /**
- * Single non-streaming round-trip that supports function/tool calls.
- * Returns the assistant turn, which may contain tool_calls for the caller to execute.
+ * Streaming chat completion with tool-use support.
+ * Yields AgentStreamEvents: content deltas, tool_call argument fragments,
+ * finish reason, and a terminal done event.
+ * The caller accumulates tool_call deltas and executes tools on finish='tool_calls'.
  */
-export async function chatWithTools(opts: {
+export async function* streamWithTools(opts: {
 	apiKey: string;
 	model: string;
 	messages: AgentMessage[];
 	tools: ToolDefinition[];
 	signal?: AbortSignal;
-}): Promise<{ role: 'assistant'; content: string | null; tool_calls?: ToolCall[] }> {
+}): AsyncGenerator<AgentStreamEvent, void, unknown> {
 	const res = await fetch(OPENROUTER_URL, {
 		method: 'POST',
 		headers: {
@@ -116,12 +114,13 @@ export async function chatWithTools(opts: {
 			model: opts.model,
 			messages: opts.messages,
 			tools: opts.tools,
-			stream: false
+			tool_choice: 'auto',
+			stream: true
 		}),
 		signal: opts.signal
 	});
 
-	if (!res.ok) {
+	if (!res.ok || !res.body) {
 		const detail = await res.text().catch(() => '');
 		throw new OpenRouterError(
 			`OpenRouter request failed (${res.status}): ${detail.slice(0, 200)}`,
@@ -129,11 +128,5 @@ export async function chatWithTools(opts: {
 		);
 	}
 
-	const data = (await res.json()) as {
-		choices: Array<{
-			message: { role: 'assistant'; content: string | null; tool_calls?: ToolCall[] };
-		}>;
-	};
-
-	return data.choices[0].message;
+	yield* parseSSEWithTools(res.body);
 }

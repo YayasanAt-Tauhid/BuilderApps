@@ -20,8 +20,9 @@ export const GET: RequestHandler = async (event) => {
 	if (!gen || gen.projectId !== project.id) return errors.notFound('Generation');
 
 	const stub = env.DO_REALTIME.get(env.DO_REALTIME.idFromName(project.id));
-	// Bridge the Workers/DOM type universes (runtime-correct forward of the stream body).
-	const doFetch = stub.fetch as unknown as (req: Request) => Promise<Response>;
+	// Bind to preserve `this` (a detached stub.fetch throws "Illegal invocation"); the
+	// cast bridges the Workers/DOM type universes for this runtime-correct stream forward.
+	const doFetch = stub.fetch.bind(stub) as unknown as (req: Request) => Promise<Response>;
 	const doResp = await doFetch(new Request(`https://do/subscribe?gid=${gen.id}`));
 
 	return new Response(doResp.body as unknown as ReadableStream, {

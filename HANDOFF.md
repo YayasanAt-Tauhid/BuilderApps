@@ -36,6 +36,11 @@ DeepSeek V4 Flash → DO → R2/D1), file browse, export zip, usage metering.
   (separate origin → use a short-lived query-param token, since the session cookie
   is scoped to the app origin), or stream via an SSE ReadableStream proxied from the DO.
 - Production-only bug fixed: Workers caps PBKDF2 at 100_000 iterations (was 600_000).
+- Production-only bug fixed: the hand-rolled CSP `script-src 'self'` blocked SvelteKit's
+  inline hydration bootstrap → the page never hydrated (Send had no handler, no spinner,
+  no result). CSP is now emitted by SvelteKit (`kit.csp` hash mode) and the competing
+  middleware CSP was removed; X-Frame-Options → SAMEORIGIN. Verified end-to-end in a real
+  headless browser: spinner shows, generation runs, assistant reply renders, 0 console errors.
 
 ## Deploy notes
 

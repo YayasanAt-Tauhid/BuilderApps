@@ -3,23 +3,13 @@
 export function applySecurityHeaders(response: Response): Response {
 	const h = response.headers;
 	h.set('X-Content-Type-Options', 'nosniff');
-	h.set('X-Frame-Options', 'DENY');
+	// SAMEORIGIN (not DENY) so the app can frame its own sandboxed preview iframe.
+	h.set('X-Frame-Options', 'SAMEORIGIN');
 	h.set('Referrer-Policy', 'strict-origin-when-cross-origin');
 	h.set('Permissions-Policy', 'geolocation=(), microphone=(), camera=()');
-	h.set(
-		'Content-Security-Policy',
-		[
-			"default-src 'self'",
-			"script-src 'self'",
-			"style-src 'self' 'unsafe-inline'",
-			"img-src 'self' data:",
-			"connect-src 'self' wss: https:",
-			// Generated frontend preview runs in a sandboxed iframe (PRD §4 Should).
-			"frame-src 'self' blob:",
-			"object-src 'none'",
-			"base-uri 'self'",
-			"form-action 'self'"
-		].join('; ')
-	);
+	// NOTE: the Content-Security-Policy is emitted by SvelteKit itself (see
+	// svelte.config.js `kit.csp`), which hashes its inline bootstrap script. We must
+	// NOT set a competing CSP here — a second policy would also block that inline
+	// script (and would clobber the sandboxed preview route's own CSP).
 	return response;
 }

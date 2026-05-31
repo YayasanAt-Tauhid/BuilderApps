@@ -1,6 +1,9 @@
 <script lang="ts">
 	import { enhance } from '$app/forms';
 	import { m } from '$lib/paraglide/messages';
+	import { Button } from '$lib/components/ui/button';
+	import { Input } from '$lib/components/ui/input';
+	import { Label } from '$lib/components/ui/label';
 	import type { ActionData } from './$types';
 
 	let { form }: { form: ActionData } = $props();
@@ -28,33 +31,17 @@
 	}}
 	class="flex flex-col gap-4"
 >
-	<label class="flex flex-col gap-1 text-sm">
-		<span>{m.auth_email()}</span>
-		<input
-			name="email"
-			type="email"
-			required
-			autocomplete="email"
-			class="rounded-md border bg-background px-3 py-2"
-		/>
-	</label>
-	<label class="flex flex-col gap-1 text-sm">
-		<span>{m.auth_password()}</span>
-		<input
-			name="password"
-			type="password"
-			required
-			autocomplete="current-password"
-			class="rounded-md border bg-background px-3 py-2"
-		/>
-	</label>
-	<button
-		type="submit"
-		disabled={loading}
-		class="rounded-md bg-primary px-4 py-2 font-medium text-primary-foreground hover:opacity-90 disabled:opacity-50"
-	>
+	<div class="flex flex-col gap-1.5">
+		<Label for="email">{m.auth_email()}</Label>
+		<Input id="email" name="email" type="email" required autocomplete="email" />
+	</div>
+	<div class="flex flex-col gap-1.5">
+		<Label for="password">{m.auth_password()}</Label>
+		<Input id="password" name="password" type="password" required autocomplete="current-password" />
+	</div>
+	<Button type="submit" disabled={loading}>
 		{loading ? '…' : m.auth_login()}
-	</button>
+	</Button>
 </form>
 
 <p class="mt-4 text-center text-sm text-muted-foreground">

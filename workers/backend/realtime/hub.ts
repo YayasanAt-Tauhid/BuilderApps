@@ -26,15 +26,34 @@ generate a complete, runnable project. Output ONLY files, each delimited exactly
 
 Rules:
 - Use forward slashes in paths; never use absolute paths or "..".
-- Emit every file the project needs (source, config, README).
+- Emit every file the project needs.
+- For a previewable frontend, make index.html self-contained: put CSS in an inline <style>
+  tag and JS in an inline <script> tag inside index.html (avoid external local files), so it
+  renders correctly in a sandboxed preview. A CDN (e.g. Tailwind Play CDN) is acceptable.
 - Do not wrap files in markdown code fences. Brief prose between blocks is allowed but ignored.`;
 
+const enc = new TextEncoder();
+
+interface Live {
+	buffer: string;
+	writers: Set<WritableStreamDefaultWriter<Uint8Array>>;
+	finished: boolean;
+	result?: {
+		status: 'succeeded' | 'failed';
+		version: number;
+		fileCount?: number;
+		message?: string;
+	};
+}
+
 /**
- * Per-project WebSocket hub + generation runner (PRD §11.4).
- * SQLite-backed Durable Object (free-tier eligible). One instance per projectId.
+ * Per-project generation runner + live SSE relay (PRD §11.4).
+ * SQLite-backed Durable Object. The app worker triggers `/start` (fire-and-forget via
+ * waitUntil, so generation always completes + persists) and clients attach to `/subscribe`
+ * to receive live token events over Server-Sent Events.
  */
 export class RealtimeHub {
-	private sessions = new Set<WebSocket>();
+	private live = new Map<string, Live>();
 
 	constructor(
 		private state: DurableObjectState,
@@ -43,52 +62,80 @@ export class RealtimeHub {
 
 	async fetch(request: Request): Promise<Response> {
 		const url = new URL(request.url);
-		if (url.pathname === '/ws') return this.handleWebSocket();
 		if (url.pathname === '/start') return this.handleStart(request);
+		if (url.pathname === '/subscribe') return this.handleSubscribe(url);
 		return new Response('Not found', { status: 404 });
 	}
 
-	private handleWebSocket(): Response {
-		const pair = new WebSocketPair();
-		const client = pair[0];
-		const server = pair[1];
-		server.accept();
-		this.sessions.add(server);
-		server.addEventListener('close', () => this.sessions.delete(server));
-		server.addEventListener('error', () => this.sessions.delete(server));
-		return new Response(null, { status: 101, webSocket: client });
+	private sse(eventName: string, data: unknown): Uint8Array {
+		return enc.encode(`event: ${eventName}\ndata: ${JSON.stringify(data)}\n\n`);
 	}
 
-	private broadcast(event: Record<string, unknown>): void {
-		const payload = JSON.stringify(event);
-		for (const ws of this.sessions) {
-			try {
-				ws.send(payload);
-			} catch {
-				this.sessions.delete(ws);
-			}
+	private writeAll(live: Live, chunk: Uint8Array): void {
+		for (const w of live.writers) {
+			w.write(chunk).catch(() => live.writers.delete(w));
 		}
 	}
 
 	private async handleStart(request: Request): Promise<Response> {
 		const job = (await request.json()) as StartJob;
-		// Keep the DO alive for the whole generation; the app worker called us via waitUntil.
-		await this.runGeneration(job);
+		if (!this.live.has(job.generationId)) {
+			this.live.set(job.generationId, { buffer: '', writers: new Set(), finished: false });
+			// Awaited so the DO stays alive for the whole run (caller used waitUntil).
+			await this.runGeneration(job);
+		}
 		return new Response('ok');
 	}
 
+	private async handleSubscribe(url: URL): Promise<Response> {
+		const gid = url.searchParams.get('gid') ?? '';
+		const headers = {
+			'content-type': 'text/event-stream',
+			'cache-control': 'no-cache',
+			'x-accel-buffering': 'no'
+		};
+
+		// Wait briefly for /start to register the generation (it runs near-simultaneously).
+		let live = this.live.get(gid);
+		for (let i = 0; i < 20 && !live; i++) {
+			await new Promise((r) => setTimeout(r, 150));
+			live = this.live.get(gid);
+		}
+
+		const { readable, writable } = new TransformStream<Uint8Array, Uint8Array>();
+		const writer = writable.getWriter();
+
+		if (!live) {
+			// Generation not active here (already finished + cleaned up, or never started):
+			// tell the client to fall back to polling.
+			writer.write(this.sse('fallback', { gid })).catch(() => {});
+			writer.close().catch(() => {});
+			return new Response(readable, { headers });
+		}
+
+		// Replay what has streamed so far.
+		if (live.buffer) writer.write(this.sse('token', { content: live.buffer })).catch(() => {});
+
+		if (live.finished && live.result) {
+			const name = live.result.status === 'succeeded' ? 'done' : 'failed';
+			writer.write(this.sse(name, live.result)).catch(() => {});
+			writer.close().catch(() => {});
+		} else {
+			live.writers.add(writer);
+		}
+		return new Response(readable, { headers });
+	}
+
 	private async runGeneration(job: StartJob): Promise<void> {
+		const live = this.live.get(job.generationId)!;
 		const db = createDb(this.env.DB);
-		const now = () => Date.now();
 
 		if (!this.env.OPENROUTER_API_KEY) {
-			await this.failGeneration(db, job, 'AI service is not configured.');
+			await this.fail(db, job, live, 'AI service is not configured.');
 			return;
 		}
 
 		try {
-			this.broadcast({ type: 'status', status: 'running', generationId: job.generationId });
-
 			let full = '';
 			for await (const delta of streamChat({
 				apiKey: this.env.OPENROUTER_API_KEY,
@@ -100,11 +147,12 @@ export class RealtimeHub {
 			})) {
 				if (delta.done) break;
 				full += delta.content;
-				this.broadcast({ type: 'token', content: delta.content });
+				live.buffer += delta.content;
+				this.writeAll(live, this.sse('token', { content: delta.content }));
 			}
 
 			const files = parseGeneratedFiles(full);
-			const ts = now();
+			const ts = Date.now();
 
 			for (const file of files) {
 				const key = fileKey(job.projectId, job.version, file.path);
@@ -124,7 +172,6 @@ export class RealtimeHub {
 				});
 			}
 
-			// Persist the assistant reply (full text shown in chat).
 			await db.insert(messages).values({
 				id: ulid(),
 				projectId: job.projectId,
@@ -152,22 +199,22 @@ export class RealtimeHub {
 				.set({ status: 'ready', updatedAt: ts })
 				.where(eq(projects.id, job.projectId));
 
-			this.broadcast({
-				type: 'done',
-				generationId: job.generationId,
-				version: job.version,
-				fileCount: files.length
-			});
+			live.result = { status: 'succeeded', version: job.version, fileCount: files.length };
+			live.finished = true;
+			this.writeAll(live, this.sse('done', live.result));
+			for (const w of live.writers) w.close().catch(() => {});
+			this.scheduleCleanup(job.generationId);
 		} catch (err) {
 			// User-safe message only — never leak provider internals or PII (PRD §5 M4).
 			console.error('generation failed', err);
-			await this.failGeneration(db, job, 'Generation failed. Please try again.');
+			await this.fail(db, job, live, 'Generation failed. Please try again.');
 		}
 	}
 
-	private async failGeneration(
+	private async fail(
 		db: ReturnType<typeof createDb>,
 		job: StartJob,
+		live: Live,
 		message: string
 	): Promise<void> {
 		const ts = Date.now();
@@ -179,6 +226,15 @@ export class RealtimeHub {
 			.update(projects)
 			.set({ status: 'error', updatedAt: ts })
 			.where(eq(projects.id, job.projectId));
-		this.broadcast({ type: 'error', generationId: job.generationId, message });
+
+		live.result = { status: 'failed', version: job.version, message };
+		live.finished = true;
+		this.writeAll(live, this.sse('failed', live.result));
+		for (const w of live.writers) w.close().catch(() => {});
+		this.scheduleCleanup(job.generationId);
+	}
+
+	private scheduleCleanup(gid: string): void {
+		setTimeout(() => this.live.delete(gid), 60_000);
 	}
 }

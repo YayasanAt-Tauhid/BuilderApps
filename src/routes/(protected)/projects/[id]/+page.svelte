@@ -8,6 +8,7 @@
 	let history = $state<ChatMsg[]>(
 		data.messages.map((x) => ({ id: x.id, role: x.role, content: x.content }))
 	);
+	let streaming = $state('');
 	let status = $state<'idle' | 'running' | 'error'>('idle');
 	let statusText = $state('');
 	let prompt = $state('');
@@ -25,45 +26,21 @@
 		return new Promise((r) => setTimeout(r, ms));
 	}
 
-	async function send(event: SubmitEvent) {
-		event.preventDefault();
-		const content = prompt.trim();
-		if (!content || status === 'running') return;
+	async function finishOk(version: number) {
+		history = await refreshMessages();
+		streaming = '';
+		status = 'idle';
+		statusText = `Done — generated files are in the Files tab (v${version}).`;
+	}
 
-		history = [...history, { id: crypto.randomUUID(), role: 'user', content }];
-		prompt = '';
-		status = 'running';
-		statusText = 'Generating… this can take a few seconds.';
-
-		const res = await fetch(`/api/v1/projects/${projectId}/messages`, {
-			method: 'POST',
-			headers: { 'Content-Type': 'application/json' },
-			body: JSON.stringify({ content })
-		});
-
-		if (!res.ok) {
-			status = 'error';
-			const body = await res.json().catch(() => null);
-			statusText = body?.error?.message ?? 'Request failed.';
-			return;
-		}
-
-		const { data: created } = await res.json();
-		const generationId: string = created.generation.id;
-
-		// Poll the generation status until it finishes (WebSocket streaming is disabled —
-		// generation results are persisted, so we poll and then load the assistant reply).
+	// Fallback when the live stream is unavailable: poll the generation status.
+	async function pollGeneration(generationId: string) {
 		for (let i = 0; i < 90; i++) {
 			await sleep(2000);
 			const gRes = await fetch(`/api/v1/generations/${generationId}`);
 			if (!gRes.ok) continue;
 			const g = (await gRes.json()).data;
-			if (g.status === 'succeeded') {
-				history = await refreshMessages();
-				status = 'idle';
-				statusText = `Done — generated files are in the Files tab (v${g.version}).`;
-				return;
-			}
+			if (g.status === 'succeeded') return finishOk(g.version);
 			if (g.status === 'failed') {
 				status = 'error';
 				statusText = g.errorMessage ?? 'Generation failed. Please try again.';
@@ -72,6 +49,92 @@
 		}
 		status = 'error';
 		statusText = 'Generation timed out. Please try again.';
+	}
+
+	// Live token streaming over SSE (parsed from a fetch ReadableStream).
+	async function streamGeneration(generationId: string) {
+		const res = await fetch(`/api/v1/projects/${projectId}/generations/${generationId}/stream`, {
+			headers: { Accept: 'text/event-stream' }
+		});
+		if (!res.ok || !res.body) throw new Error('stream unavailable');
+
+		const reader = res.body.getReader();
+		const decoder = new TextDecoder();
+		let buf = '';
+		let needFallback = false;
+
+		for (;;) {
+			const { done, value } = await reader.read();
+			if (done) break;
+			buf += decoder.decode(value, { stream: true });
+
+			let sep: number;
+			while ((sep = buf.indexOf('\n\n')) !== -1) {
+				const frame = buf.slice(0, sep);
+				buf = buf.slice(sep + 2);
+
+				let eventName = 'message';
+				let dataStr = '';
+				for (const line of frame.split('\n')) {
+					if (line.startsWith('event:')) eventName = line.slice(6).trim();
+					else if (line.startsWith('data:')) dataStr += line.slice(5).trim();
+				}
+				let payload: Record<string, unknown>;
+				try {
+					payload = dataStr ? JSON.parse(dataStr) : {};
+				} catch {
+					payload = {};
+				}
+
+				if (eventName === 'token') {
+					streaming += String(payload.content ?? '');
+				} else if (eventName === 'done') {
+					await finishOk(Number(payload.version ?? 1));
+					return;
+				} else if (eventName === 'failed') {
+					status = 'error';
+					statusText = String(payload.message ?? 'Generation failed. Please try again.');
+					return;
+				} else if (eventName === 'fallback') {
+					needFallback = true;
+				}
+			}
+		}
+		// Stream ended without an explicit done/failed → reconcile via polling.
+		await pollGeneration(generationId);
+		void needFallback;
+	}
+
+	async function send(event: SubmitEvent) {
+		event.preventDefault();
+		const content = prompt.trim();
+		if (!content || status === 'running') return;
+
+		history = [...history, { id: crypto.randomUUID(), role: 'user', content }];
+		prompt = '';
+		status = 'running';
+		streaming = '';
+		statusText = 'Generating…';
+
+		const res = await fetch(`/api/v1/projects/${projectId}/messages`, {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({ content })
+		});
+		if (!res.ok) {
+			status = 'error';
+			const body = await res.json().catch(() => null);
+			statusText = body?.error?.message ?? 'Request failed.';
+			return;
+		}
+		const { data: created } = await res.json();
+		const generationId: string = created.generation.id;
+
+		try {
+			await streamGeneration(generationId);
+		} catch {
+			await pollGeneration(generationId);
+		}
 	}
 </script>
 
@@ -96,6 +159,14 @@
 				<pre class="whitespace-pre-wrap font-mono text-xs">{msg.content}</pre>
 			</div>
 		{/each}
+
+		{#if streaming}
+			<div class="rounded-md border bg-background p-3 text-sm">
+				<span class="mb-1 block text-xs font-medium text-muted-foreground">assistant</span>
+				<pre class="whitespace-pre-wrap font-mono text-xs">{streaming}</pre>
+			</div>
+		{/if}
+
 		{#if status === 'running'}
 			<p class="flex items-center gap-2 text-sm text-muted-foreground">
 				<span class="h-3 w-3 animate-spin rounded-full border-2 border-primary border-t-transparent"

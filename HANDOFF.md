@@ -21,9 +21,28 @@ Updated: 2026-05-31 · Phase: 2 (scaffold) · Context budget used: ~70%
 
 ## Next action
 
-Phase 3 review pass complete locally. Remaining before deploy: fill the FILL\_\* binding
-ids in wrangler configs (create real D1/KV/R2/Queue), set OPENROUTER_API_KEY secret on the
-backend worker, then `pnpm deploy:all` (backend FIRST).
+DEPLOYED & live (Cloudflare account 2f85a...): app worker
+`builderpro.yayasan-attauhid-1.workers.dev` + backend worker `builderpro-backend`.
+Verified end-to-end in production: auth, project CRUD, AI generation (OpenRouter
+DeepSeek V4 Flash → DO → R2/D1), file browse, export zip, usage metering.
+
+## Known issues / follow-ups
+
+- Live token streaming via WebSocket is DISABLED. WS upgrades cannot be returned
+  through a SvelteKit `+server.ts` handler on adapter-cloudflare (the 101/webSocket
+  response is dropped → 500). The chat page now POLLS generation status and reloads
+  the persisted assistant message on completion (reliable, no live tokens).
+  To restore streaming: connect the browser directly to the backend worker's DO
+  (separate origin → use a short-lived query-param token, since the session cookie
+  is scoped to the app origin), or stream via an SSE ReadableStream proxied from the DO.
+- Production-only bug fixed: Workers caps PBKDF2 at 100_000 iterations (was 600_000).
+
+## Deploy notes
+
+- VPS (103.67.78.41) used as deploy box: Node 22 via nvm (system Node 20 untouched),
+  repo cloned at ~/builderapps with real binding ids filled in wrangler configs.
+- Resource ids: D1 999239b0-9fb3-40f0-b535-99528970cc9e · KV 2b07e0f2e5c749969f609b79e17f6ddf
+  · R2 builderpro-files · Queue builderpro-jobs.
 
 ## Assumptions in force
 

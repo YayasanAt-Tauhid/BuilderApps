@@ -44,7 +44,7 @@
 	"durable_objects": {
 		"bindings": [
 			{
-				"binding": "DO_REALTIME",
+				"name": "DO_REALTIME",
 				"class_name": "RealtimeHub",
 				"script_name": "builderpro-backend"
 			}
@@ -69,7 +69,7 @@
 			"durable_objects": {
 				"bindings": [
 					{
-						"binding": "DO_REALTIME",
+						"name": "DO_REALTIME",
 						"class_name": "RealtimeHub",
 						"script_name": "builderpro-backend-staging"
 					}
@@ -94,7 +94,7 @@
 			"durable_objects": {
 				"bindings": [
 					{
-						"binding": "DO_REALTIME",
+						"name": "DO_REALTIME",
 						"class_name": "RealtimeHub",
 						"script_name": "builderpro-backend"
 					}

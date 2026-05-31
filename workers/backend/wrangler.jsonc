@@ -1,0 +1,70 @@
+{
+	// Backend Worker (builderpro-backend) — plain TS worker that OWNS the RealtimeHub
+	// Durable Object, the Queue consumer, and the Cron scheduled handler (PRD §11.0).
+	"$schema": "../../node_modules/wrangler/config-schema.json",
+	"name": "builderpro-backend",
+	"main": "index.ts",
+	"compatibility_date": "2026-05-30",
+	"compatibility_flags": ["nodejs_compat"],
+	"observability": {
+		"enabled": true
+	},
+	"d1_databases": [
+		{
+			"binding": "DB",
+			"database_name": "builderpro-db",
+			"database_id": "FILL_DATABASE_ID",
+			"migrations_dir": "../../drizzle/migrations"
+		}
+	],
+	"kv_namespaces": [{ "binding": "KV", "id": "FILL_KV_ID" }],
+	"r2_buckets": [{ "binding": "BUCKET", "bucket_name": "builderpro-files" }],
+	"queues": {
+		"producers": [{ "binding": "QUEUE", "queue": "builderpro-jobs" }],
+		"consumers": [
+			{
+				"queue": "builderpro-jobs",
+				"max_batch_size": 10,
+				"max_batch_timeout": 30,
+				"max_retries": 3
+			}
+		]
+	},
+	"durable_objects": {
+		"bindings": [{ "name": "DO_REALTIME", "class_name": "RealtimeHub" }]
+	},
+	"migrations": [
+		{
+			"tag": "v1",
+			// SQLite-backed class → free-tier eligible (PRD QUESTION-2).
+			"new_sqlite_classes": ["RealtimeHub"]
+		}
+	],
+	"triggers": {
+		// Hourly cleanup + usage rollover (PRD §11.4).
+		"crons": ["0 * * * *"]
+	},
+	"env": {
+		"production": {
+			"name": "builderpro-backend",
+			"d1_databases": [
+				{
+					"binding": "DB",
+					"database_name": "builderpro-db",
+					"database_id": "FILL_DATABASE_ID",
+					"migrations_dir": "../../drizzle/migrations"
+				}
+			],
+			"kv_namespaces": [{ "binding": "KV", "id": "FILL_KV_ID" }],
+			"r2_buckets": [{ "binding": "BUCKET", "bucket_name": "builderpro-files" }],
+			"queues": {
+				"producers": [{ "binding": "QUEUE", "queue": "builderpro-jobs" }],
+				"consumers": [{ "queue": "builderpro-jobs", "max_batch_size": 10, "max_retries": 3 }]
+			},
+			"durable_objects": {
+				"bindings": [{ "name": "DO_REALTIME", "class_name": "RealtimeHub" }]
+			},
+			"triggers": { "crons": ["0 * * * *"] }
+		}
+	}
+}

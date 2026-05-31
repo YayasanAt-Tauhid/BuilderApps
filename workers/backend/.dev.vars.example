@@ -1,0 +1,5 @@
+# Backend worker (builderpro-backend) — local dev secrets.
+# Copy to workers/backend/.dev.vars (git-ignored) and fill in.
+
+# Authenticates the backend worker's calls to OpenRouter. Never commit the real key.
+OPENROUTER_API_KEY="sk-or-v1-..."

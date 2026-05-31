@@ -17,7 +17,14 @@ export default ts.config(
 		},
 		rules: {
 			'no-console': ['error', { allow: ['warn', 'error'] }],
-			'@typescript-eslint/no-explicit-any': 'error'
+			'@typescript-eslint/no-explicit-any': 'error',
+			'@typescript-eslint/no-unused-vars': [
+				'error',
+				{ argsIgnorePattern: '^_', varsIgnorePattern: '^_' }
+			],
+			// Static internal links use plain string hrefs; resolve() adds churn with no
+			// benefit for non-parameterised paths in this app.
+			'svelte/no-navigation-without-resolve': 'off'
 		}
 	},
 	{

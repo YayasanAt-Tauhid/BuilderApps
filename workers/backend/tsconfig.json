@@ -1,0 +1,19 @@
+{
+	"compilerOptions": {
+		"target": "esnext",
+		"module": "esnext",
+		"moduleResolution": "bundler",
+		"lib": ["esnext"],
+		"types": ["@cloudflare/workers-types"],
+		"strict": true,
+		"skipLibCheck": true,
+		"noEmit": true,
+		"esModuleInterop": true,
+		"resolveJsonModule": true,
+		"isolatedModules": true,
+		"verbatimModuleSyntax": false
+	},
+	"include": ["**/*.ts", "../../src/lib/server/**/*.ts", "../../src/lib/utils/**/*.ts"],
+	// context.ts is app-only (depends on @sveltejs/kit + App.* ambient types).
+	"exclude": ["../../src/lib/server/context.ts"]
+}

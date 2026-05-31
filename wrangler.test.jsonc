@@ -1,0 +1,23 @@
+{
+	// Bindings for integration tests (vitest-pool-workers). Mirrors the app worker's
+	// DB/KV/R2/QUEUE bindings but omits the cross-script DO_REALTIME binding, which
+	// cannot resolve without the backend worker present in the test runtime.
+	"$schema": "node_modules/wrangler/config-schema.json",
+	"name": "builderpro-test",
+	"main": "tests/integration/_worker.ts",
+	"compatibility_date": "2026-05-30",
+	"compatibility_flags": ["nodejs_compat"],
+	"d1_databases": [
+		{
+			"binding": "DB",
+			"database_name": "builderpro-db-test",
+			"database_id": "test",
+			"migrations_dir": "drizzle/migrations"
+		}
+	],
+	"kv_namespaces": [{ "binding": "KV", "id": "test-kv" }],
+	"r2_buckets": [{ "binding": "BUCKET", "bucket_name": "builderpro-files-test" }],
+	"queues": {
+		"producers": [{ "binding": "QUEUE", "queue": "builderpro-jobs-test" }]
+	}
+}

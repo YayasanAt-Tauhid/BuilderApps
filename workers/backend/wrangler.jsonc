@@ -13,11 +13,11 @@
 		{
 			"binding": "DB",
 			"database_name": "builderpro-db",
-			"database_id": "999239b0-9fb3-40f0-b535-99528970cc9e",
+			"database_id": "FILL_DATABASE_ID",
 			"migrations_dir": "../../drizzle/migrations"
 		}
 	],
-	"kv_namespaces": [{ "binding": "KV", "id": "2b07e0f2e5c749969f609b79e17f6ddf" }],
+	"kv_namespaces": [{ "binding": "KV", "id": "FILL_KV_ID" }],
 	"r2_buckets": [{ "binding": "BUCKET", "bucket_name": "builderpro-files" }],
 	"queues": {
 		"producers": [{ "binding": "QUEUE", "queue": "builderpro-jobs" }],
@@ -51,11 +51,11 @@
 				{
 					"binding": "DB",
 					"database_name": "builderpro-db",
-					"database_id": "999239b0-9fb3-40f0-b535-99528970cc9e",
+					"database_id": "FILL_DATABASE_ID",
 					"migrations_dir": "../../drizzle/migrations"
 				}
 			],
-			"kv_namespaces": [{ "binding": "KV", "id": "2b07e0f2e5c749969f609b79e17f6ddf" }],
+			"kv_namespaces": [{ "binding": "KV", "id": "FILL_KV_ID" }],
 			"r2_buckets": [{ "binding": "BUCKET", "bucket_name": "builderpro-files" }],
 			"queues": {
 				"producers": [{ "binding": "QUEUE", "queue": "builderpro-jobs" }],

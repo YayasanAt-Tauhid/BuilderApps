@@ -20,22 +20,23 @@
 		{#each parsed.files as file, i (i)}
 			{@const key = String(i)}
 			{@const isOpen = expanded[key]}
+			{@const working = live && i === parsed.files.length - 1}
 			<li class="overflow-hidden rounded-md border bg-background">
 				<button
 					type="button"
 					onclick={() => toggle(key)}
 					class="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-muted"
 				>
-					{#if file.complete}
-						<span class="text-success" aria-label="done">✓</span>
-					{:else}
+					{#if working}
 						<span
 							class="h-3 w-3 shrink-0 animate-spin rounded-full border-2 border-primary border-t-transparent"
 							aria-label="generating"
 						></span>
+					{:else}
+						<span class="text-success" aria-label="done">✓</span>
 					{/if}
 					<span class="flex-1 truncate font-mono text-xs">{file.path}</span>
-					{#if !file.complete}
+					{#if working}
 						<span class="text-xs text-muted-foreground">writing…</span>
 					{/if}
 					<span class="text-muted-foreground transition-transform" class:rotate-90={isOpen}>›</span>
@@ -48,5 +49,10 @@
 		{/each}
 	</ul>
 {:else if live}
-	<p class="text-sm text-muted-foreground">Thinking…</p>
+	<p class="flex items-center gap-2 text-sm text-muted-foreground">
+		<span
+			class="h-3 w-3 shrink-0 animate-spin rounded-full border-2 border-primary border-t-transparent"
+		></span>
+		Thinking…
+	</p>
 {/if}

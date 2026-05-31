@@ -1,0 +1,12 @@
+onlyBuiltDependencies:
+  - esbuild
+  - sharp
+  - workerd
+  - '@tailwindcss/oxide'
+minimumReleaseAgeExclude:
+  - eslint-plugin-svelte@3.19.0
+allowBuilds:
+  esbuild: true
+  sharp: true
+  workerd: true
+  '@tailwindcss/oxide': true

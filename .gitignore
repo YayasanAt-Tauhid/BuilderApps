@@ -1,0 +1,28 @@
+node_modules/
+
+# SvelteKit / Vite
+.svelte-kit/
+build/
+dist/
+.vite/
+
+# Cloudflare / Wrangler
+.wrangler/
+.dev.vars
+workers/backend/.dev.vars
+
+# Paraglide (generated)
+src/lib/paraglide/
+
+# Test output
+coverage/
+test-results/
+playwright-report/
+playwright/.cache/
+
+# Env / OS
+.env
+.env.*
+!.env.example
+.DS_Store
+*.log

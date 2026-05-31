@@ -1,0 +1,105 @@
+{
+	// App Worker (builderpro) — SvelteKit app (HTTP/SSR/API).
+	// Producer for QUEUE; cross-script DO binding to the backend worker.
+	"$schema": "node_modules/wrangler/config-schema.json",
+	"name": "builderpro",
+	"main": ".svelte-kit/cloudflare/_worker.js",
+	"compatibility_date": "2026-05-30",
+	"compatibility_flags": ["nodejs_compat"],
+	"assets": {
+		"binding": "ASSETS",
+		"directory": ".svelte-kit/cloudflare"
+	},
+	"observability": {
+		"enabled": true
+	},
+	"d1_databases": [
+		{
+			"binding": "DB",
+			"database_name": "builderpro-db",
+			"database_id": "FILL_DATABASE_ID",
+			"migrations_dir": "drizzle/migrations"
+		}
+	],
+	"kv_namespaces": [
+		{
+			"binding": "KV",
+			"id": "FILL_KV_ID"
+		}
+	],
+	"r2_buckets": [
+		{
+			"binding": "BUCKET",
+			"bucket_name": "builderpro-files"
+		}
+	],
+	"queues": {
+		"producers": [
+			{
+				"binding": "QUEUE",
+				"queue": "builderpro-jobs"
+			}
+		]
+	},
+	"durable_objects": {
+		"bindings": [
+			{
+				"binding": "DO_REALTIME",
+				"class_name": "RealtimeHub",
+				"script_name": "builderpro-backend"
+			}
+		]
+	},
+	"env": {
+		"staging": {
+			"name": "builderpro-staging",
+			"d1_databases": [
+				{
+					"binding": "DB",
+					"database_name": "builderpro-db-staging",
+					"database_id": "FILL_DATABASE_ID_STAGING",
+					"migrations_dir": "drizzle/migrations"
+				}
+			],
+			"kv_namespaces": [{ "binding": "KV", "id": "FILL_KV_ID_STAGING" }],
+			"r2_buckets": [{ "binding": "BUCKET", "bucket_name": "builderpro-files-staging" }],
+			"queues": {
+				"producers": [{ "binding": "QUEUE", "queue": "builderpro-jobs-staging" }]
+			},
+			"durable_objects": {
+				"bindings": [
+					{
+						"binding": "DO_REALTIME",
+						"class_name": "RealtimeHub",
+						"script_name": "builderpro-backend-staging"
+					}
+				]
+			}
+		},
+		"production": {
+			"name": "builderpro",
+			"d1_databases": [
+				{
+					"binding": "DB",
+					"database_name": "builderpro-db",
+					"database_id": "FILL_DATABASE_ID",
+					"migrations_dir": "drizzle/migrations"
+				}
+			],
+			"kv_namespaces": [{ "binding": "KV", "id": "FILL_KV_ID" }],
+			"r2_buckets": [{ "binding": "BUCKET", "bucket_name": "builderpro-files" }],
+			"queues": {
+				"producers": [{ "binding": "QUEUE", "queue": "builderpro-jobs" }]
+			},
+			"durable_objects": {
+				"bindings": [
+					{
+						"binding": "DO_REALTIME",
+						"class_name": "RealtimeHub",
+						"script_name": "builderpro-backend"
+					}
+				]
+			}
+		}
+	}
+}

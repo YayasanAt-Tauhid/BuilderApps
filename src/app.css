@@ -1,0 +1,88 @@
+@import 'tailwindcss';
+@import 'tw-animate-css';
+
+/* Tailwind v4 CSS-first config (no tailwind.config.ts, no PostCSS/autoprefixer).
+   Dark mode is class-based: the `.dark` class on <html> toggles the dark tokens. */
+@custom-variant dark (&:where(.dark, .dark *));
+
+:root {
+	--background: hsl(0 0% 100%);
+	--foreground: hsl(222.2 47.4% 11.2%);
+	--card: hsl(0 0% 100%);
+	--card-foreground: hsl(222.2 47.4% 11.2%);
+	--muted: hsl(210 40% 96.1%);
+	--muted-foreground: hsl(215.4 16.3% 46.9%);
+	--border: hsl(214.3 31.8% 91.4%);
+	--input: hsl(214.3 31.8% 91.4%);
+	--ring: hsl(238.7 83.5% 66.7%);
+
+	/* Brand accent = indigo (PRD §7) */
+	--primary: hsl(238.7 83.5% 66.7%);
+	--primary-foreground: hsl(0 0% 100%);
+
+	/* Semantic tokens */
+	--success: hsl(142.1 70.6% 45.3%);
+	--warning: hsl(37.7 92.1% 50.2%);
+	--destructive: hsl(0 72.2% 50.6%);
+	--destructive-foreground: hsl(0 0% 100%);
+
+	--radius: 0.5rem;
+}
+
+.dark {
+	--background: hsl(222.2 47.4% 11.2%);
+	--foreground: hsl(210 40% 98%);
+	--card: hsl(222.2 44% 14%);
+	--card-foreground: hsl(210 40% 98%);
+	--muted: hsl(217.2 32.6% 17.5%);
+	--muted-foreground: hsl(215 20.2% 65.1%);
+	--border: hsl(217.2 32.6% 20%);
+	--input: hsl(217.2 32.6% 20%);
+	--ring: hsl(238.7 83.5% 66.7%);
+
+	--primary: hsl(238.7 83.5% 66.7%);
+	--primary-foreground: hsl(0 0% 100%);
+
+	--success: hsl(142.1 70.6% 45.3%);
+	--warning: hsl(37.7 92.1% 50.2%);
+	--destructive: hsl(0 62.8% 50.6%);
+	--destructive-foreground: hsl(0 0% 100%);
+}
+
+/* Expose tokens to Tailwind utilities (bg-background, text-foreground, etc.) */
+@theme inline {
+	--color-background: var(--background);
+	--color-foreground: var(--foreground);
+	--color-card: var(--card);
+	--color-card-foreground: var(--card-foreground);
+	--color-muted: var(--muted);
+	--color-muted-foreground: var(--muted-foreground);
+	--color-border: var(--border);
+	--color-input: var(--input);
+	--color-ring: var(--ring);
+	--color-primary: var(--primary);
+	--color-primary-foreground: var(--primary-foreground);
+	--color-success: var(--success);
+	--color-warning: var(--warning);
+	--color-destructive: var(--destructive);
+	--color-destructive-foreground: var(--destructive-foreground);
+	--radius-lg: var(--radius);
+	--radius-md: calc(var(--radius) - 2px);
+	--radius-sm: calc(var(--radius) - 4px);
+	--font-mono: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace;
+}
+
+* {
+	border-color: var(--border);
+}
+
+body {
+	background-color: var(--background);
+	color: var(--foreground);
+	font-family:
+		system-ui,
+		-apple-system,
+		'Segoe UI',
+		Roboto,
+		sans-serif;
+}

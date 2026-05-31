@@ -1,0 +1,5 @@
+# App worker (builderpro) — local dev vars.
+# The app worker holds NO secrets (CSRF is origin-based; sessions/password hashing
+# use Web Crypto and need no shared secret). This file is intentionally minimal.
+#
+# The OPENROUTER_API_KEY lives on the BACKEND worker only — see workers/backend/.dev.vars.example

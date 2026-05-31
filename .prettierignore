@@ -1,0 +1,14 @@
+node_modules/
+.svelte-kit/
+.wrangler/
+build/
+dist/
+coverage/
+test-results/
+playwright-report/
+pnpm-lock.yaml
+src/lib/paraglide/
+src/lib/components/ui/
+project.inlang/
+drizzle/migrations/
+messages/

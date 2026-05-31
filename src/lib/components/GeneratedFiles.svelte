@@ -32,18 +32,12 @@
 							class="h-3 w-3 shrink-0 animate-spin rounded-full border-2 border-primary border-t-transparent"
 							aria-label="generating"
 						></span>
-					{:else if file.isPatch}
-						<span class="text-blue-400" aria-label="patched">✎</span>
 					{:else}
 						<span class="text-success" aria-label="done">✓</span>
 					{/if}
 					<span class="flex-1 truncate font-mono text-xs">{file.path}</span>
 					{#if working}
-						<span class="text-xs text-muted-foreground"
-							>{file.isPatch ? 'patching…' : 'writing…'}</span
-						>
-					{:else if file.isPatch}
-						<span class="text-xs text-muted-foreground">patch</span>
+						<span class="text-xs text-muted-foreground">writing…</span>
 					{/if}
 					<span class="text-muted-foreground transition-transform" class:rotate-90={isOpen}>›</span>
 				</button>

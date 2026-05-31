@@ -6,8 +6,6 @@ export interface StreamFile {
 	path: string;
 	content: string;
 	complete: boolean;
-	/** True when this entry represents a PATCH block (targeted edit), not a full file. */
-	isPatch: boolean;
 }
 
 export interface ParsedStream {
@@ -16,9 +14,7 @@ export interface ParsedStream {
 }
 
 const FILE_RE = /^===\s*FILE:\s*(.+?)\s*===$/;
-const FILE_END_RE = /^===\s*END FILE\s*===$/;
-const PATCH_RE = /^===\s*PATCH:\s*(.+?)\s*===$/;
-const PATCH_END_RE = /^===\s*END PATCH\s*===$/;
+const END_RE = /^===\s*END FILE\s*===$/;
 
 export function parseStream(text: string): ParsedStream {
 	const lines = text.split('\n');
@@ -29,29 +25,18 @@ export function parseStream(text: string): ParsedStream {
 	let sawFile = false;
 
 	for (const line of lines) {
-		const fileStart = line.match(FILE_RE);
-		if (fileStart) {
+		const start = line.match(FILE_RE);
+		if (start) {
 			if (current) {
 				current.content = buf.join('\n');
 				files.push(current);
 			}
-			current = { path: fileStart[1], content: '', complete: false, isPatch: false };
+			current = { path: start[1], content: '', complete: false };
 			buf = [];
 			sawFile = true;
 			continue;
 		}
-		const patchStart = line.match(PATCH_RE);
-		if (patchStart) {
-			if (current) {
-				current.content = buf.join('\n');
-				files.push(current);
-			}
-			current = { path: patchStart[1], content: '', complete: false, isPatch: true };
-			buf = [];
-			sawFile = true;
-			continue;
-		}
-		if (FILE_END_RE.test(line) || PATCH_END_RE.test(line)) {
+		if (END_RE.test(line)) {
 			if (current) {
 				current.content = buf.join('\n');
 				current.complete = true;

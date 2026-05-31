@@ -11,9 +11,7 @@ describe('parseStream (live chat parser)', () => {
 		].join('\n');
 		const { intro, files } = parseStream(text);
 		expect(intro).toBe('Here is your project:');
-		expect(files).toEqual([
-			{ path: 'index.html', content: '<h1>Hi</h1>', complete: true, isPatch: false }
-		]);
+		expect(files).toEqual([{ path: 'index.html', content: '<h1>Hi</h1>', complete: true }]);
 	});
 
 	it('marks the trailing in-progress file as incomplete', () => {
@@ -21,7 +19,6 @@ describe('parseStream (live chat parser)', () => {
 		const { files } = parseStream(text);
 		expect(files).toHaveLength(1);
 		expect(files[0].complete).toBe(false);
-		expect(files[0].isPatch).toBe(false);
 		expect(files[0].path).toBe('app.js');
 	});
 
@@ -37,37 +34,5 @@ describe('parseStream (live chat parser)', () => {
 
 	it('returns no files for plain prose', () => {
 		expect(parseStream('just thinking...').files).toHaveLength(0);
-	});
-
-	it('detects PATCH blocks with isPatch flag', () => {
-		const text = [
-			'=== PATCH: src/app.css ===',
-			'@@ ... @@',
-			'-color: red;',
-			'+color: blue;',
-			'=== END PATCH ==='
-		].join('\n');
-		const { files } = parseStream(text);
-		expect(files).toHaveLength(1);
-		expect(files[0].path).toBe('src/app.css');
-		expect(files[0].isPatch).toBe(true);
-		expect(files[0].complete).toBe(true);
-	});
-
-	it('handles mixed FILE and PATCH blocks', () => {
-		const text = [
-			'=== FILE: index.html ===',
-			'<h1>Hi</h1>',
-			'=== END FILE ===',
-			'=== PATCH: style.css ===',
-			'@@ ... @@',
-			'-color: red;',
-			'+color: blue;',
-			'=== END PATCH ==='
-		].join('\n');
-		const { files } = parseStream(text);
-		expect(files).toHaveLength(2);
-		expect(files[0].isPatch).toBe(false);
-		expect(files[1].isPatch).toBe(true);
 	});
 });

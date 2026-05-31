@@ -1,9 +1,9 @@
-import { eq, asc, and } from 'drizzle-orm';
+import { eq } from 'drizzle-orm';
 import { createDb } from '../../../src/lib/server/db';
 import { generations, generatedFiles, messages, projects } from '../../../src/lib/server/db/schema';
 import { streamChat, estimateTokens, DEFAULT_MODEL } from '../../../src/lib/server/ai';
-import { parseOutput, applyPatch } from '../../../src/lib/server/ai/parser';
-import { fileKey, putFile, getFileText, contentHash } from '../../../src/lib/server/storage/r2';
+import { parseGeneratedFiles } from '../../../src/lib/server/ai/parser';
+import { fileKey, putFile, contentHash } from '../../../src/lib/server/storage/r2';
 import { recordUsage } from '../../../src/lib/server/usage';
 import { ulid } from '../../../src/lib/utils/ulid';
 import type { Env } from '../../../src/lib/server/env';
@@ -13,13 +13,11 @@ interface StartJob {
 	projectId: string;
 	userId: string;
 	version: number;
-	/** null = first generation; otherwise the version whose files are the edit base. */
-	prevVersion: number | null;
 	prompt: string;
 	model?: string;
 }
 
-const SYSTEM_PROMPT_NEW = `You are BuilderPro, an expert full-stack engineer. Given a description,
+const SYSTEM_PROMPT = `You are BuilderPro, an expert full-stack engineer. Given a description,
 generate a complete, runnable project. Output ONLY files, each delimited exactly like this:
 
 === FILE: relative/path/to/file.ext ===
@@ -33,36 +31,6 @@ Rules:
   tag and JS in an inline <script> tag inside index.html (avoid external local files), so it
   renders correctly in a sandboxed preview. A CDN (e.g. Tailwind Play CDN) is acceptable.
 - Do not wrap files in markdown code fences. Brief prose between blocks is allowed but ignored.`;
-
-const SYSTEM_PROMPT_EDIT = `You are BuilderPro, an expert full-stack engineer editing an existing
-project. The current project files are provided above in === FILE: ... === blocks.
-
-For each file you need to change, choose the most appropriate format:
-
-1. UNIFIED DIFF (preferred for targeted changes — saves tokens):
-=== PATCH: relative/path/to/file.ext ===
-@@ ... @@
- context line
--removed line
-+added line
- context line
-=== END PATCH ===
-
-Rules for PATCH:
-- Use @@ ... @@ as the hunk header (no line numbers needed).
-- Space-prefix unchanged context lines, - for removed, + for added.
-- Include 2-3 lines of context around each change.
-- Multiple @@ hunks per PATCH block are fine.
-
-2. FULL REWRITE (use when changes are extensive or adding a new file):
-=== FILE: relative/path/to/file.ext ===
-<full file content>
-=== END FILE ===
-
-General rules:
-- Only output files/patches that actually change. Skip unchanged files entirely.
-- Use forward slashes in paths; never use absolute paths or "..".
-- Do not wrap content in markdown code fences.`;
 
 const enc = new TextEncoder();
 
@@ -80,8 +48,8 @@ interface Live {
 
 /**
  * Per-project generation runner + live SSE relay (PRD §11.4).
- * SQLite-backed Durable Object. The app worker triggers /start (fire-and-forget via
- * waitUntil, so generation always completes + persists) and clients attach to /subscribe
+ * SQLite-backed Durable Object. The app worker triggers `/start` (fire-and-forget via
+ * waitUntil, so generation always completes + persists) and clients attach to `/subscribe`
  * to receive live token events over Server-Sent Events.
  */
 export class RealtimeHub {
@@ -113,6 +81,7 @@ export class RealtimeHub {
 		const job = (await request.json()) as StartJob;
 		if (!this.live.has(job.generationId)) {
 			this.live.set(job.generationId, { buffer: '', writers: new Set(), finished: false });
+			// Awaited so the DO stays alive for the whole run (caller used waitUntil).
 			await this.runGeneration(job);
 		}
 		return new Response('ok');
@@ -126,6 +95,7 @@ export class RealtimeHub {
 			'x-accel-buffering': 'no'
 		};
 
+		// Wait briefly for /start to register the generation (it runs near-simultaneously).
 		let live = this.live.get(gid);
 		for (let i = 0; i < 20 && !live; i++) {
 			await new Promise((r) => setTimeout(r, 150));
@@ -136,11 +106,14 @@ export class RealtimeHub {
 		const writer = writable.getWriter();
 
 		if (!live) {
+			// Generation not active here (already finished + cleaned up, or never started):
+			// tell the client to fall back to polling.
 			writer.write(this.sse('fallback', { gid })).catch(() => {});
 			writer.close().catch(() => {});
 			return new Response(readable, { headers });
 		}
 
+		// Replay what has streamed so far.
 		if (live.buffer) writer.write(this.sse('token', { content: live.buffer })).catch(() => {});
 
 		if (live.finished && live.result) {
@@ -163,62 +136,12 @@ export class RealtimeHub {
 		}
 
 		try {
-			// ── 1. Load conversation history ──────────────────────────────────────
-			const history = await db
-				.select()
-				.from(messages)
-				.where(eq(messages.projectId, job.projectId))
-				.orderBy(asc(messages.createdAt));
-
-			const isEdit = job.prevVersion !== null;
-
-			// ── 2. Load existing files for edit mode ──────────────────────────────
-			const existingFiles = new Map<string, string>(); // path → content
-			let filesContext = '';
-
-			if (isEdit && job.prevVersion !== null) {
-				const prevFiles = await db
-					.select()
-					.from(generatedFiles)
-					.where(
-						and(
-							eq(generatedFiles.projectId, job.projectId),
-							eq(generatedFiles.version, job.prevVersion)
-						)
-					);
-
-				await Promise.all(
-					prevFiles.map(async (f) => {
-						const content = await getFileText(this.env.BUCKET, f.r2Key);
-						if (content !== null) existingFiles.set(f.path as string, content);
-					})
-				);
-
-				filesContext =
-					'\n\nCurrent project files:\n' +
-					[...existingFiles.entries()]
-						.map(([p, c]) => `=== FILE: ${p} ===\n${c}\n=== END FILE ===`)
-						.join('\n\n');
-			}
-
-			// ── 3. Build prompt messages ───────────────────────────────────────────
-			const systemPrompt = (isEdit ? SYSTEM_PROMPT_EDIT : SYSTEM_PROMPT_NEW) + filesContext;
-
-			// Include prior conversation (exclude the current user message — passed as prompt).
-			// Cap at 20 messages to stay within context budget.
-			const historyMessages = history
-				.slice(0, -1)
-				.slice(-20)
-				.map((m) => ({ role: m.role as 'user' | 'assistant', content: m.content }));
-
-			// ── 4. Stream ─────────────────────────────────────────────────────────
 			let full = '';
 			for await (const delta of streamChat({
 				apiKey: this.env.OPENROUTER_API_KEY,
 				model: job.model ?? DEFAULT_MODEL,
 				messages: [
-					{ role: 'system', content: systemPrompt },
-					...historyMessages,
+					{ role: 'system', content: SYSTEM_PROMPT },
 					{ role: 'user', content: job.prompt }
 				]
 			})) {
@@ -228,40 +151,21 @@ export class RealtimeHub {
 				this.writeAll(live, this.sse('token', { content: delta.content }));
 			}
 
-			// ── 5. Parse FILE + PATCH blocks ──────────────────────────────────────
-			const { files: newFiles, patches } = parseOutput(full);
+			const files = parseGeneratedFiles(full);
 			const ts = Date.now();
 
-			// Start from existing files; apply rewrites and patches on top.
-			const finalFiles = new Map<string, string>(existingFiles);
-
-			for (const f of newFiles) {
-				finalFiles.set(f.path, f.content);
-			}
-
-			for (const patch of patches) {
-				const base = finalFiles.get(patch.path) ?? '';
-				const patched = applyPatch(base, patch);
-				if (patched !== null) {
-					finalFiles.set(patch.path, patched);
-				} else {
-					console.warn(`[hub] patch hunk not found for ${patch.path} — skipping`);
-				}
-			}
-
-			// ── 6. Persist to R2 + D1 ────────────────────────────────────────────
-			for (const [path, content] of finalFiles) {
-				const key = fileKey(job.projectId, job.version, path);
-				await putFile(this.env.BUCKET, key, content);
+			for (const file of files) {
+				const key = fileKey(job.projectId, job.version, file.path);
+				await putFile(this.env.BUCKET, key, file.content);
 				await db.insert(generatedFiles).values({
 					id: ulid(),
 					projectId: job.projectId,
 					generationId: job.generationId,
-					path,
+					path: file.path,
 					version: job.version,
 					r2Key: key,
-					sizeBytes: new TextEncoder().encode(content).byteLength,
-					contentHash: contentHash(content),
+					sizeBytes: new TextEncoder().encode(file.content).byteLength,
+					contentHash: contentHash(file.content),
 					createdAt: ts,
 					updatedAt: ts,
 					deletedAt: null
@@ -282,7 +186,7 @@ export class RealtimeHub {
 			});
 
 			await recordUsage(db, job.userId, {
-				input: estimateTokens(job.prompt) + estimateTokens(systemPrompt),
+				input: estimateTokens(job.prompt) + estimateTokens(SYSTEM_PROMPT),
 				output: estimateTokens(full)
 			});
 
@@ -295,7 +199,7 @@ export class RealtimeHub {
 				.set({ status: 'ready', updatedAt: ts })
 				.where(eq(projects.id, job.projectId));
 
-			live.result = { status: 'succeeded', version: job.version, fileCount: finalFiles.size };
+			live.result = { status: 'succeeded', version: job.version, fileCount: files.length };
 			live.finished = true;
 			this.writeAll(live, this.sse('done', live.result));
 			for (const w of live.writers) w.close().catch(() => {});

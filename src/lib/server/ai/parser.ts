@@ -7,23 +7,45 @@
 //   <file content>
 //   === END FILE ===
 //
-// Any prose outside FILE blocks is ignored (it is shown in chat but not written to R2).
+// For update mode the model may also emit:
+//   === DELETE: relative/path ===
+//
+// Any prose outside FILE/DELETE blocks is ignored.
 
 export interface ParsedFile {
 	path: string;
 	content: string;
 }
 
+export interface ParseResult {
+	files: ParsedFile[];
+	deletedPaths: string[];
+}
+
 const FILE_RE = /^===\s*FILE:\s*(.+?)\s*===$/;
 const END_RE = /^===\s*END FILE\s*===$/;
+const DELETE_RE = /^===\s*DELETE:\s*(.+?)\s*===$/;
 
-export function parseGeneratedFiles(output: string): ParsedFile[] {
+export function parseGeneratedFiles(output: string): ParseResult {
 	const lines = output.split('\n');
 	const files: ParsedFile[] = [];
+	const deletedPaths: string[] = [];
 	let currentPath: string | null = null;
 	let buf: string[] = [];
 
 	for (const line of lines) {
+		const deleteMatch = line.match(DELETE_RE);
+		if (deleteMatch) {
+			if (currentPath !== null) {
+				files.push({ path: currentPath, content: buf.join('\n') });
+				currentPath = null;
+				buf = [];
+			}
+			const p = sanitizePath(deleteMatch[1]);
+			if (p) deletedPaths.push(p);
+			continue;
+		}
+
 		const startMatch = line.match(FILE_RE);
 		if (startMatch) {
 			// A new FILE marker implicitly closes any unterminated previous block.
@@ -34,6 +56,7 @@ export function parseGeneratedFiles(output: string): ParsedFile[] {
 			buf = [];
 			continue;
 		}
+
 		if (END_RE.test(line)) {
 			if (currentPath !== null) {
 				files.push({ path: currentPath, content: buf.join('\n') });
@@ -42,6 +65,7 @@ export function parseGeneratedFiles(output: string): ParsedFile[] {
 			}
 			continue;
 		}
+
 		if (currentPath !== null) buf.push(line);
 	}
 
@@ -55,7 +79,11 @@ export function parseGeneratedFiles(output: string): ParsedFile[] {
 	for (const f of files) {
 		if (f.path) byPath.set(f.path, f.content);
 	}
-	return [...byPath.entries()].map(([path, content]) => ({ path, content }));
+
+	return {
+		files: [...byPath.entries()].map(([path, content]) => ({ path, content })),
+		deletedPaths: [...new Set(deletedPaths)]
+	};
 }
 
 /** Reject path traversal and absolute paths; normalize separators. */

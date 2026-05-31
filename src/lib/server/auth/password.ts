@@ -2,9 +2,11 @@ import { encodeHexLowerCase } from '@oslojs/encoding';
 
 // Password hashing via PBKDF2 over the Web Crypto API (crypto.subtle).
 // Native bcrypt/argon2 binaries do not run on Workers; PBKDF2 is natively available.
-// Optional future upgrade: argon2id via WASM. See PRD §12.1 / ASSUMPTION-8.
+// NOTE: the Cloudflare Workers runtime caps PBKDF2 at 100_000 iterations
+// ("iteration counts above 100000 are not supported"), so this is the maximum.
+// Optional future upgrade for a higher work factor: argon2id via WASM. See PRD §12.1 / ASSUMPTION-8.
 
-const ITERATIONS = 600_000;
+const ITERATIONS = 100_000;
 const HASH = 'SHA-256';
 const KEY_LEN_BITS = 256;
 const SALT_BYTES = 16;

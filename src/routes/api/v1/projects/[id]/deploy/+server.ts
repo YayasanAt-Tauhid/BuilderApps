@@ -5,6 +5,12 @@ import { requireOwnedProject, getEnv } from '$lib/server/context';
 import { generatedFiles, projects } from '$lib/server/db/schema';
 import { getFileText } from '$lib/server/storage/r2';
 
+function isSvelteKitProject(paths: string[]): boolean {
+	return paths.some(
+		(p) => p.endsWith('.svelte') || p === 'svelte.config.js' || p.startsWith('src/routes/')
+	);
+}
+
 export const POST: RequestHandler = async (event) => {
 	const { db, project } = await requireOwnedProject(event, event.params.id);
 	const env = getEnv(event);
@@ -18,7 +24,6 @@ export const POST: RequestHandler = async (event) => {
 	const version = Number(latest);
 	if (version === 0) return errors.notFound('No generated files to deploy');
 
-	// Load file metadata then content from R2
 	const rows = await db
 		.select({ path: generatedFiles.path, r2Key: generatedFiles.r2Key })
 		.from(generatedFiles)
@@ -26,7 +31,21 @@ export const POST: RequestHandler = async (event) => {
 
 	if (rows.length === 0) return errors.notFound('No files found');
 
-	// Publish files to R2 under published/{projectId}/{path}
+	// SvelteKit projects need a build step — instruct to use GitHub + CI/CD.
+	if (isSvelteKitProject(rows.map((r) => r.path))) {
+		const repoUrl = project.githubLastCommitSha
+			? `https://github.com/${project.slug}`
+			: null;
+		return ok({
+			sveltekit: true,
+			message:
+				'Push to GitHub to deploy. The generated .github/workflows/deploy.yml will build and deploy to Cloudflare Pages automatically.',
+			repoUrl,
+			version
+		});
+	}
+
+	// Plain HTML project — publish files to R2 under published/{projectId}/{path}
 	await Promise.all(
 		rows.map(async (row) => {
 			const content = await getFileText(env.BUCKET, row.r2Key);

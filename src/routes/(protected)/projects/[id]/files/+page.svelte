@@ -24,6 +24,7 @@
 
 	let deploying = $state(false);
 	let deployError = $state<string | null>(null);
+	let deployInfo = $state<string | null>(null);
 	let cfPagesUrl = $state(data.project.cfPagesUrl ?? null);
 
 	// Mobile tab: 'history' | 'files' | 'viewer'
@@ -89,11 +90,16 @@
 	async function deployToCloudflare() {
 		deploying = true;
 		deployError = null;
+		deployInfo = null;
 		try {
 			const res = await fetch(`/api/v1/projects/${data.project.id}/deploy`, { method: 'POST' });
 			if (res.ok) {
-				const json = (await res.json()) as { data: { url: string } };
-				cfPagesUrl = json.data.url;
+				const json = (await res.json()) as { data: { url?: string; sveltekit?: boolean; message?: string; repoUrl?: string } };
+				if (json.data.sveltekit) {
+					deployInfo = json.data.message ?? 'Push to GitHub to deploy via GitHub Actions.';
+				} else if (json.data.url) {
+					cfPagesUrl = json.data.url;
+				}
 			} else {
 				const json = (await res.json()) as { error?: { message?: string } };
 				deployError = json.error?.message ?? 'Deploy failed.';
@@ -252,6 +258,22 @@
 		{err}
 	</div>
 {/each}
+
+<!-- SvelteKit deploy info -->
+{#if deployInfo}
+	<div class="mb-4 flex items-start gap-3 rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm dark:border-blue-900 dark:bg-blue-950/40">
+		<svg xmlns="http://www.w3.org/2000/svg" class="mt-0.5 size-4 shrink-0 text-blue-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg>
+		<div>
+			<p class="font-medium text-blue-800 dark:text-blue-300">SvelteKit — GitHub Actions diperlukan</p>
+			<p class="mt-0.5 text-blue-700 dark:text-blue-400">{deployInfo}</p>
+			<ol class="mt-2 space-y-0.5 text-xs text-blue-600 dark:text-blue-500">
+				<li>1. Klik <strong>Push to GitHub</strong> untuk upload source code</li>
+				<li>2. Tambahkan secret <code class="rounded bg-blue-100 px-1 dark:bg-blue-900">CLOUDFLARE_API_TOKEN</code> di Settings → Secrets repo GitHub</li>
+				<li>3. GitHub Actions otomatis build + deploy ke Cloudflare Pages</li>
+			</ol>
+		</div>
+	</div>
+{/if}
 
 <!-- Supabase banner -->
 {#if data.supabaseConnected}

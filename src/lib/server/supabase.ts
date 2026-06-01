@@ -135,3 +135,32 @@ export async function getTableSchemas(token: string, ref: string): Promise<Table
 	if (!result.ok) return [];
 	return result.data.filter((t) => t.schema === 'public');
 }
+
+export interface MigrationResult {
+	ok: boolean;
+	error?: string;
+}
+
+/**
+ * Run a SQL migration against a Supabase project via the Management API.
+ * Uses POST /v1/projects/{ref}/database/migrations.
+ * The SQL should use IF NOT EXISTS so re-running is idempotent.
+ */
+export async function runMigration(
+	token: string,
+	ref: string,
+	sql: string,
+	name = 'builderpro_init'
+): Promise<MigrationResult> {
+	const result = await supabaseRequest<unknown>(
+		token,
+		'POST',
+		`/projects/${ref}/database/migrations`,
+		{ query: sql, name }
+	);
+	if (!result.ok) {
+		console.error(`[supabase] runMigration failed: ${result.status} ${result.message}`);
+		return { ok: false, error: result.message };
+	}
+	return { ok: true };
+}

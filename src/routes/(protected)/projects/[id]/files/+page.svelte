@@ -259,24 +259,16 @@
 	</div>
 {/each}
 
-<!-- SvelteKit + Supabase deploy info -->
+<!-- SvelteKit deploy info -->
 {#if deployInfo}
 	<div class="mb-4 rounded-xl border border-blue-200 bg-blue-50 px-4 py-4 text-sm dark:border-blue-900 dark:bg-blue-950/40">
 		<div class="mb-2 flex items-center gap-2">
 			<svg xmlns="http://www.w3.org/2000/svg" class="size-4 text-blue-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg>
-			<p class="font-semibold text-blue-800 dark:text-blue-300">SvelteKit + Supabase — Deploy via GitHub Actions</p>
+			<p class="font-semibold text-blue-800 dark:text-blue-300">Deploy via GitHub Actions</p>
 		</div>
-		<ol class="space-y-1 text-xs text-blue-700 dark:text-blue-400">
-			<li><strong>1.</strong> Connect Supabase di <a href="/settings" class="underline">Settings</a> → link project ini ke Supabase project</li>
-			<li><strong>2.</strong> Klik <strong>Push to GitHub</strong> → tambahkan 4 GitHub Secrets di repo settings:</li>
-			<li class="ml-4">
-				<code class="rounded bg-blue-100 px-1 dark:bg-blue-900">CLOUDFLARE_API_TOKEN</code>
-				<code class="rounded bg-blue-100 px-1 dark:bg-blue-900">VITE_SUPABASE_URL</code>
-				<code class="rounded bg-blue-100 px-1 dark:bg-blue-900">VITE_SUPABASE_ANON_KEY</code>
-				<code class="rounded bg-blue-100 px-1 dark:bg-blue-900">SUPABASE_ACCESS_TOKEN</code>
-			</li>
-			<li><strong>3.</strong> GitHub Actions otomatis: migrate DB → build → deploy ke Cloudflare Pages 🚀</li>
-		</ol>
+		<p class="text-xs text-blue-700 dark:text-blue-400">
+			Klik <strong>Push</strong> — GitHub Actions akan otomatis build dan deploy ke Cloudflare Pages. Semua credentials sudah di-set otomatis. 🚀
+		</p>
 	</div>
 {/if}
 

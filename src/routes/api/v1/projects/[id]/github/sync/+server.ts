@@ -98,17 +98,12 @@ export const POST: RequestHandler = async (event) => {
 	if (project.supabaseAnonKey) secrets['VITE_SUPABASE_ANON_KEY'] = project.supabaseAnonKey;
 	if (supabaseAccessToken) secrets['SUPABASE_ACCESS_TOKEN'] = supabaseAccessToken;
 
-	// Create a scoped Cloudflare Pages API token and set it as a secret.
-	if (cloudflareAccessToken) {
-		createPagesDeployToken(cloudflareAccessToken, project.slug)
-			.then((cfToken) => {
-				if (cfToken) secrets['CLOUDFLARE_API_TOKEN'] = cfToken;
-				if (Object.keys(secrets).length > 0) {
-					setRepoSecrets(githubAccessToken!, githubLogin!, project.slug, secrets).catch(() => {});
-				}
-			})
-			.catch(() => {});
-	} else if (Object.keys(secrets).length > 0) {
+	// Cloudflare: user's own token takes priority; fall back to BuilderPro admin token.
+	const cfToken = cloudflareAccessToken || env.CLOUDFLARE_PAGES_API_TOKEN || null;
+	if (cfToken) secrets['CLOUDFLARE_API_TOKEN'] = cfToken;
+	if (env.CLOUDFLARE_ACCOUNT_ID) secrets['CLOUDFLARE_ACCOUNT_ID'] = env.CLOUDFLARE_ACCOUNT_ID;
+
+	if (Object.keys(secrets).length > 0) {
 		setRepoSecrets(githubAccessToken!, githubLogin!, project.slug, secrets).catch(() => {});
 	}
 

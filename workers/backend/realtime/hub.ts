@@ -9,7 +9,7 @@ import { fileKey, putFile, getFileText, contentHash } from '../../../src/lib/ser
 import { recordUsage } from '../../../src/lib/server/usage';
 import { ulid } from '../../../src/lib/utils/ulid';
 import type { Env } from '../../../src/lib/server/env';
-import { pushFilesToRepo, enableGithubPages, registerWebhook } from '../../../src/lib/server/github';
+import { pushFilesToRepo, enableGithubPages, registerWebhook, setRepoSecrets } from '../../../src/lib/server/github';
 import { runMigration } from '../../../src/lib/server/supabase';
 
 interface StartJob {
@@ -399,7 +399,12 @@ export class RealtimeHub {
 		if (!project?.githubPagesUrl) return;
 
 		const [userRow] = await db
-			.select({ githubAccessToken: users.githubAccessToken, githubLogin: users.githubLogin })
+			.select({
+				githubAccessToken: users.githubAccessToken,
+				githubLogin: users.githubLogin,
+				supabaseAccessToken: users.supabaseAccessToken,
+				cloudflareAccessToken: users.cloudflareAccessToken
+			})
 			.from(users)
 			.where(eq(users.id, job.userId))
 			.limit(1);
@@ -455,5 +460,25 @@ export class RealtimeHub {
 				updatedAt: Date.now()
 			})
 			.where(eq(projects.id, job.projectId));
+
+		// Auto-set GitHub Actions secrets (Supabase + Cloudflare).
+		const supabaseProject = await db
+			.select({ supabaseUrl: projects.supabaseUrl, supabaseAnonKey: projects.supabaseAnonKey })
+			.from(projects)
+			.where(eq(projects.id, job.projectId))
+			.limit(1)
+			.then((r) => r[0]);
+
+		const secrets: Record<string, string> = {};
+		if (supabaseProject?.supabaseUrl) secrets['VITE_SUPABASE_URL'] = supabaseProject.supabaseUrl;
+		if (supabaseProject?.supabaseAnonKey) secrets['VITE_SUPABASE_ANON_KEY'] = supabaseProject.supabaseAnonKey;
+		if (userRow.supabaseAccessToken) secrets['SUPABASE_ACCESS_TOKEN'] = userRow.supabaseAccessToken;
+		const cfToken = userRow.cloudflareAccessToken || this.env.CLOUDFLARE_PAGES_API_TOKEN || null;
+		if (cfToken) secrets['CLOUDFLARE_API_TOKEN'] = cfToken;
+		if (this.env.CLOUDFLARE_ACCOUNT_ID) secrets['CLOUDFLARE_ACCOUNT_ID'] = this.env.CLOUDFLARE_ACCOUNT_ID;
+
+		if (Object.keys(secrets).length > 0) {
+			setRepoSecrets(userRow.githubAccessToken, userRow.githubLogin, project.slug, secrets).catch(() => {});
+		}
 	}
 }

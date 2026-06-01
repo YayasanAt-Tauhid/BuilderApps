@@ -106,6 +106,8 @@ on:
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    env:
+      CF_TOKEN: \${{ secrets.CLOUDFLARE_API_TOKEN }}
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -122,10 +124,14 @@ jobs:
         env:
           VITE_SUPABASE_URL: \${{ secrets.VITE_SUPABASE_URL }}
           VITE_SUPABASE_ANON_KEY: \${{ secrets.VITE_SUPABASE_ANON_KEY }}
-      - uses: cloudflare/wrangler-action@v3
+      - name: Deploy to Cloudflare Pages
+        if: \${{ env.CF_TOKEN != '' }}
+        uses: cloudflare/wrangler-action@v3
         with:
-          apiToken: \${{ secrets.CLOUDFLARE_API_TOKEN }}
+          apiToken: \${{ env.CF_TOKEN }}
           command: pages deploy .svelte-kit/cloudflare --project-name=${slug}
+        env:
+          CLOUDFLARE_ACCOUNT_ID: \${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
 `
 	);
 

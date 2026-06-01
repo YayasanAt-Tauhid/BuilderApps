@@ -4,7 +4,7 @@ import { ok, errors } from '$lib/server/api';
 import { requireOwnedProject, getEnv } from '$lib/server/context';
 import { generatedFiles, projects, users } from '$lib/server/db/schema';
 import { getFileText } from '$lib/server/storage/r2';
-import { pushFilesToRepo, enableGithubPages, registerWebhook } from '$lib/server/github';
+import { pushFilesToRepo, enableGithubPages, registerWebhook, setRepoSecrets } from '$lib/server/github';
 
 // Push the latest generated files to a GitHub repo named after the project slug.
 export const POST: RequestHandler = async (event) => {
@@ -12,12 +12,16 @@ export const POST: RequestHandler = async (event) => {
 
 	// GitHub token lives in the users table (not in the session cache).
 	const rows = await db
-		.select({ githubAccessToken: users.githubAccessToken, githubLogin: users.githubLogin })
+		.select({
+			githubAccessToken: users.githubAccessToken,
+			githubLogin: users.githubLogin,
+			supabaseAccessToken: users.supabaseAccessToken
+		})
 		.from(users)
 		.where(eq(users.id, user.id))
 		.limit(1);
 
-	const { githubAccessToken, githubLogin } = rows[0] ?? {};
+	const { githubAccessToken, githubLogin, supabaseAccessToken } = rows[0] ?? {};
 	if (!githubAccessToken || !githubLogin) {
 		return errors.forbidden();
 	}
@@ -85,6 +89,15 @@ export const POST: RequestHandler = async (event) => {
 			updatedAt: Date.now()
 		})
 		.where(eq(projects.id, project.id));
+
+	// Auto-set GitHub Actions secrets so CI can run migrations + build without manual config.
+	const secrets: Record<string, string> = {};
+	if (project.supabaseUrl) secrets['VITE_SUPABASE_URL'] = project.supabaseUrl;
+	if (project.supabaseAnonKey) secrets['VITE_SUPABASE_ANON_KEY'] = project.supabaseAnonKey;
+	if (supabaseAccessToken) secrets['SUPABASE_ACCESS_TOKEN'] = supabaseAccessToken;
+	if (Object.keys(secrets).length > 0) {
+		setRepoSecrets(githubAccessToken, githubLogin, project.slug, secrets).catch(() => {});
+	}
 
 	return ok({ repoUrl: result.repoUrl, pagesUrl, syncedVersion: version, commitSha: result.commitSha });
 };

@@ -1,4 +1,6 @@
 // GitHub REST API helpers — OAuth token exchange + Git Data API bulk push.
+import nacl from 'tweetnacl';
+import { blake2b } from '@noble/hashes/blake2.js';
 
 const GITHUB_API = 'https://api.github.com';
 const USER_AGENT = 'BuilderPro/1.0';
@@ -296,4 +298,71 @@ export async function fetchRepoFilesAtCommit(
 	);
 
 	return files.filter((f): f is FileContent => f !== null);
+}
+
+// ── GitHub Actions Secrets ────────────────────────────────────────────────────
+
+function sealedBox(message: Uint8Array, recipientPk: Uint8Array): Uint8Array {
+	const ephKeypair = nacl.box.keyPair();
+	// nonce = blake2b(eph_pk || recipient_pk, outputLen=24) — matches libsodium crypto_box_seal
+	const nonceInput = new Uint8Array(64);
+	nonceInput.set(ephKeypair.publicKey, 0);
+	nonceInput.set(recipientPk, 32);
+	const nonce = blake2b(nonceInput, { dkLen: 24 });
+	const ciphertext = nacl.box(message, nonce, recipientPk, ephKeypair.secretKey);
+	const out = new Uint8Array(32 + ciphertext.length);
+	out.set(ephKeypair.publicKey, 0);
+	out.set(ciphertext, 32);
+	return out;
+}
+
+function encryptSecret(publicKeyBase64: string, secret: string): string {
+	const recipientPk = Uint8Array.from(atob(publicKeyBase64), (c) => c.charCodeAt(0));
+	const message = new TextEncoder().encode(secret);
+	const encrypted = sealedBox(message, recipientPk);
+	return btoa(String.fromCharCode(...encrypted));
+}
+
+interface RepoPublicKey {
+	key_id: string;
+	key: string;
+}
+
+/** Set (create or update) a GitHub Actions secret in a repo. */
+export async function setRepoSecret(
+	token: string,
+	owner: string,
+	repo: string,
+	secretName: string,
+	secretValue: string
+): Promise<boolean> {
+	const pkResult = await githubRequest<RepoPublicKey>(
+		token,
+		'GET',
+		`/repos/${owner}/${repo}/actions/secrets/public-key`
+	);
+	if (!pkResult.ok) return false;
+
+	const encrypted = encryptSecret(pkResult.data.key, secretValue);
+	const result = await githubRequest(token, 'PUT', `/repos/${owner}/${repo}/actions/secrets/${secretName}`, {
+		encrypted_value: encrypted,
+		key_id: pkResult.data.key_id
+	});
+	return result.ok;
+}
+
+/** Set multiple GitHub Actions secrets. Returns names of secrets that failed. */
+export async function setRepoSecrets(
+	token: string,
+	owner: string,
+	repo: string,
+	secrets: Record<string, string>
+): Promise<string[]> {
+	const results = await Promise.all(
+		Object.entries(secrets).map(async ([name, value]) => {
+			const ok = await setRepoSecret(token, owner, repo, name, value);
+			return ok ? null : name;
+		})
+	);
+	return results.filter((r): r is string => r !== null);
 }

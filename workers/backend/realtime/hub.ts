@@ -26,8 +26,10 @@ interface StartJob {
 
 const AGENT_SYSTEM_PROMPT = `You are BuilderPro, an expert full-stack engineer. You have tools to read and write project files.
 
-For a NEW project (empty file list): write every file needed for a complete, runnable app.
-For an UPDATE: call list_files first, read only the files you need, then write only the files that changed. Never rewrite files that don't need to change.
+CRITICAL: You MUST use the write_file tool to create or update every file. Never output file content as plain text — ONLY use the write_file tool.
+
+For a NEW project (empty file list): call write_file for every file needed for a complete, runnable app.
+For an UPDATE: call list_files first, read only the files you need, then call write_file for only the files that changed.
 
 Rules for files you write:
 - Use forward slashes; no absolute paths or "..".
@@ -135,16 +137,16 @@ class WriteFileContentStreamer {
 
 		if (this.phase === 'find_content') {
 			this.searchBuf += chunk;
-			const marker = '"content":"';
-			const idx = this.searchBuf.indexOf(marker);
-			if (idx !== -1) {
+			// Allow optional whitespace around colon: "content" : "
+			const m = this.searchBuf.match(/"content"\s*:\s*"/);
+			if (m && m.index !== undefined) {
 				this.phase = 'in_content';
-				const rest = this.searchBuf.slice(idx + marker.length);
+				const rest = this.searchBuf.slice(m.index + m[0].length);
 				this.searchBuf = '';
 				return this.streamContent(rest);
 			}
-			if (this.searchBuf.length > marker.length + 64)
-				this.searchBuf = this.searchBuf.slice(-(marker.length + 16));
+			if (this.searchBuf.length > 80)
+				this.searchBuf = this.searchBuf.slice(-32);
 			return '';
 		}
 
@@ -484,7 +486,9 @@ export class RealtimeHub {
 				if (textBuffer) contentParts.push(textBuffer);
 
 				// No tool calls in this turn → model is done.
-				if (finishReason !== 'tool_calls' || pending.size === 0) break;
+				// We check pending.size only — some models set finish_reason='stop'
+				// even when tool calls are present in the stream.
+				if (pending.size === 0) break;
 
 				// ── Execute tool calls ────────────────────────────────────────
 				const toolResults: AgentMessage[] = [];
@@ -531,33 +535,44 @@ export class RealtimeHub {
 						}
 
 						case 'write_file': {
-							// Content was already streamed; extract final values from streamer.
+							// Try streamer first (streaming was active), fall back to JSON parse.
 							const streamer = ptc.streamer;
-							if (streamer) {
-								const path = sanitizePath(streamer.extractedPath ?? '');
-								if (path) {
-									writtenFiles.set(path, streamer.fullContent);
-									vfsContent.set(path, streamer.fullContent);
-									deletedPaths.delete(path);
-								}
-							} else {
-								// Fallback: parse argsRaw if streamer wasn't used.
+							let filePath: string | null = null;
+							let fileContent: string | null = null;
+
+							if (streamer && streamer.extractedPath) {
+								filePath = sanitizePath(streamer.extractedPath);
+								fileContent = streamer.fullContent;
+							}
+
+							// Always try argsRaw as fallback (catches whitespace/format issues).
+							if (!filePath || fileContent === null || fileContent === '') {
 								try {
 									const a = JSON.parse(ptc.argsRaw) as { path?: string; content?: string };
-									const path = sanitizePath(String(a.path ?? ''));
-									const content = String(a.content ?? '');
-									if (path) {
-										writtenFiles.set(path, content);
-										vfsContent.set(path, content);
-										deletedPaths.delete(path);
-										// Emit block to client (streamer wasn't active).
-										const block = `=== FILE: ${path} ===\n${content}\n=== END FILE ===\n`;
-										this.emit(live, block);
-										contentParts.push(
-											`=== FILE: ${path} ===\n${content}\n=== END FILE ===`
-										);
+									const p = sanitizePath(String(a.path ?? ''));
+									if (p) {
+										filePath = p;
+										fileContent = String(a.content ?? '');
 									}
 								} catch { /* ignore */ }
+							}
+
+							if (filePath && fileContent !== null) {
+								writtenFiles.set(filePath, fileContent);
+								vfsContent.set(filePath, fileContent);
+								deletedPaths.delete(filePath);
+								// If streamer didn't emit the block, emit it now.
+								if (!streamer || !streamer.extractedPath) {
+									const block = `=== FILE: ${filePath} ===\n${fileContent}\n=== END FILE ===\n`;
+									this.emit(live, block);
+									contentParts.push(
+										`=== FILE: ${filePath} ===\n${fileContent}\n=== END FILE ===`
+									);
+								}
+							} else {
+								console.error('write_file: could not extract path/content', {
+									argsRaw: ptc.argsRaw.slice(0, 200)
+								});
 							}
 							result = JSON.stringify({ ok: true });
 							break;
@@ -680,6 +695,14 @@ export class RealtimeHub {
 				.update(projects)
 				.set({ status: 'ready', updatedAt: ts })
 				.where(eq(projects.id, job.projectId));
+
+			if (filesToStore.length === 0) {
+				console.error('generation produced 0 files', {
+					generationId: job.generationId,
+					writtenFiles: writtenFiles.size,
+					contentParts: contentParts.length
+				});
+			}
 
 			live.result = { status: 'succeeded', version: job.version, fileCount: filesToStore.length };
 			live.finished = true;

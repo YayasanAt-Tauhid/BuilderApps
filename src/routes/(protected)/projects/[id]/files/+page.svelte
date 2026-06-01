@@ -114,9 +114,6 @@
 			</a>
 		{:else if syncedVersion !== null && !versionInSync && isViewingLatest}
 			<span class="rounded-full bg-muted px-2 py-0.5 text-xs">v{data.version}</span>
-			<span class="rounded-full bg-yellow-500/10 px-2 py-0.5 text-xs text-yellow-700 dark:text-yellow-400">
-				GitHub: v{syncedVersion}
-			</span>
 		{:else}
 			<span class="rounded-full bg-muted px-2 py-0.5 text-xs">
 				{isViewingLatest ? `v${data.version}` : `Viewing v${data.version}`}
@@ -144,24 +141,26 @@
 		{/if}
 
 		{#if data.githubLogin && data.files.length > 0 && isViewingLatest}
-			{#if pagesUrl && repoUrl && versionInSync}
+			{#if pagesUrl && repoUrl}
+				<!-- Already synced at least once — always show Re-sync regardless of version match -->
 				<a
 					href={repoUrl}
 					target="_blank"
 					rel="noopener noreferrer"
 					class="flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-sm hover:bg-muted"
 				>
-					<span class="size-2 rounded-full bg-green-500"></span>
-					GitHub synced
+					<span class="size-2 rounded-full {versionInSync ? 'bg-green-500' : 'bg-yellow-500'}"></span>
+					GitHub {versionInSync ? 'synced' : `v${syncedVersion}`}
 				</a>
 				<button
 					onclick={pushToGithub}
 					disabled={syncing}
 					class="rounded-md border px-3 py-1.5 text-sm text-muted-foreground hover:bg-muted disabled:opacity-50"
 				>
-					{syncing ? 'Re-syncing…' : 'Re-sync'}
+					{syncing ? 'Pushing…' : 'Push to GitHub'}
 				</button>
 			{:else}
+				<!-- Never synced -->
 				<button
 					onclick={pushToGithub}
 					disabled={syncing}

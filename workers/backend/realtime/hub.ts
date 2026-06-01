@@ -221,12 +221,19 @@ export class RealtimeHub {
 				}
 			}
 
-			// ── 6. Fallback: retry failed files with full-rewrite prompt ──────────
+			// ── 6. Fallback: retry failed files with current content as context ────
 			if (failedPaths.length > 0) {
+				// Include the current file contents so the AI can rewrite them correctly.
+				const failedFileBlocks = failedPaths
+					.map((p) => {
+						const content = finalFiles.get(p) ?? '';
+						return `=== FILE: ${p} ===\n${content}\n=== END FILE ===`;
+					})
+					.join('\n\n');
 				const retryPrompt =
-					`Rewrite these files in full (previous unified diff could not be applied):\n` +
-					failedPaths.join('\n') +
-					`\n\nOriginal request: ${job.prompt}`;
+					`A patch could not be applied. Rewrite ONLY the following files in full, ` +
+					`applying this change: ${job.prompt}\n\n` +
+					`Current content of files to rewrite:\n\n${failedFileBlocks}`;
 				let retryFull = '';
 				for await (const delta of streamChat({
 					apiKey: this.env.OPENROUTER_API_KEY,

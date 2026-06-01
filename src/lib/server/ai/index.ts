@@ -17,6 +17,7 @@ export interface GenerateOptions {
 	apiKey: string;
 	messages: ChatMessage[];
 	model?: string;
+	maxTokens?: number;
 	signal?: AbortSignal;
 }
 
@@ -42,6 +43,7 @@ export async function* streamChat(opts: GenerateOptions): AsyncGenerator<ChatDel
 		body: JSON.stringify({
 			model: opts.model ?? DEFAULT_MODEL,
 			messages: opts.messages,
+			max_tokens: opts.maxTokens ?? 16000,
 			stream: true
 		}),
 		signal: opts.signal

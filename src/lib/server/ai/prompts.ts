@@ -14,7 +14,8 @@ Rules:
 - Emit every file the project needs.
 - index.html must be self-contained (inline CSS/JS or CDN). No external local files.
 - No markdown code fences around file content.
-- Brief prose between blocks is allowed but ignored.`;
+- Brief prose between blocks is allowed but ignored.
+- CRITICAL: Always output COMPLETE files. Never truncate, never add "// ... rest of code" or similar. If a file is long, output it fully.`;
 
 /** Edit generation — prefer unified diff, full rewrite only when necessary. */
 export const PROMPT_EDIT = `You are BuilderPro, an expert full-stack engineer editing an existing project.
@@ -60,15 +61,23 @@ export function buildSupabaseBlock(ctx: SupabaseContext): string {
 		.map((t) => `- ${t.name}: ${t.columns.map((c) => `${c.name} (${c.type})`).join(', ')}`)
 		.join('\n');
 	return `
-This project uses Supabase for database/backend.
-Load via CDN: <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-Initialise: const { createClient } = supabase; const db = createClient('${ctx.url}', '${ctx.anonKey}')
+SUPABASE INTEGRATION — REQUIRED:
+This project is linked to a live Supabase instance. You MUST use the exact credentials below.
+NEVER use placeholder values like 'your-project-url' or 'your-anon-key'.
+
+Load via CDN (in <head>):
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+
+Initialise with THESE EXACT values (copy verbatim):
+const { createClient } = supabase;
+const db = createClient('${ctx.url}', '${ctx.anonKey}');
 
 Database tables (public schema):
-${tableList || '(no tables yet)'}
+${tableList || '(no tables yet — create them via db.from() as needed, Supabase will auto-create on insert with RLS disabled)'}
 
 Use db.from('table').select/insert/update/delete() for all data operations.
-Always handle errors: const { data, error } = await db.from(...).select()`;
+Always destructure errors: const { data, error } = await db.from(...).select()
+If no tables exist yet, design the schema and use it — the app will work once tables are created in Supabase.`;
 }
 
 /** Builds the full system message for an edit turn, injecting current file contents. */

@@ -5,7 +5,6 @@ import { requireOwnedProject, getEnv } from '$lib/server/context';
 import { generatedFiles, projects, users } from '$lib/server/db/schema';
 import { getFileText } from '$lib/server/storage/r2';
 import { pushFilesToRepo, enableGithubPages, registerWebhook, setRepoSecrets } from '$lib/server/github';
-import { createAdminScopedPagesToken } from '$lib/server/cloudflare-oauth';
 
 // Push the latest generated files to a GitHub repo named after the project slug.
 export const POST: RequestHandler = async (event) => {
@@ -98,16 +97,8 @@ export const POST: RequestHandler = async (event) => {
 	if (project.supabaseAnonKey) secrets['VITE_SUPABASE_ANON_KEY'] = project.supabaseAnonKey;
 	if (supabaseAccessToken) secrets['SUPABASE_ACCESS_TOKEN'] = supabaseAccessToken;
 
-	// User's own CF token takes priority. Otherwise auto-create a scoped deploy token from
-	// admin master token so the master token never ends up in GitHub secrets.
-	let cfToken: string | null = cloudflareAccessToken ?? null;
-	if (!cfToken && env.CLOUDFLARE_PAGES_API_TOKEN && env.CLOUDFLARE_ACCOUNT_ID) {
-		cfToken = await createAdminScopedPagesToken(
-			env.CLOUDFLARE_PAGES_API_TOKEN,
-			env.CLOUDFLARE_ACCOUNT_ID,
-			project.slug
-		);
-	}
+	// Cloudflare: user's own token takes priority; fall back to BuilderPro admin token.
+	const cfToken = cloudflareAccessToken || env.CLOUDFLARE_PAGES_API_TOKEN || null;
 	if (cfToken) secrets['CLOUDFLARE_API_TOKEN'] = cfToken;
 	if (env.CLOUDFLARE_ACCOUNT_ID) secrets['CLOUDFLARE_ACCOUNT_ID'] = env.CLOUDFLARE_ACCOUNT_ID;
 

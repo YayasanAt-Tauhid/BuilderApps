@@ -14,7 +14,12 @@
 <div class="mb-4 flex items-center gap-3">
 	<a href="/projects/{projectId}" class="text-sm text-muted-foreground hover:text-primary">← Back</a>
 	<h1 class="text-xl font-bold">{m.project_preview()}</h1>
+
 	{#if pagesUrl}
+		<span class="flex items-center gap-1.5 rounded-full bg-green-500/10 px-2.5 py-0.5 text-xs font-medium text-green-700 dark:text-green-400">
+			<span class="size-1.5 rounded-full bg-green-500"></span>
+			GitHub Pages
+		</span>
 		<a
 			href={pagesUrl}
 			target="_blank"
@@ -23,6 +28,11 @@
 		>
 			↗ Open in new tab
 		</a>
+	{:else}
+		<span class="flex items-center gap-1.5 rounded-full bg-muted px-2.5 py-0.5 text-xs font-medium text-muted-foreground">
+			<span class="size-1.5 rounded-full bg-muted-foreground/50"></span>
+			Internal preview
+		</span>
 	{/if}
 </div>
 
@@ -38,7 +48,7 @@
 {:else}
 	<p class="mb-3 text-sm text-muted-foreground">
 		Sandboxed preview of the generated frontend only (not full-stack execution).
-		<a href="/projects/{projectId}/files" class="hover:text-primary underline">Connect GitHub</a> to get a live shareable preview.
+		<a href="/projects/{projectId}/files" class="underline hover:text-primary">Sync to GitHub</a> to get a live shareable preview.
 	</p>
 	<iframe
 		title="Frontend preview"

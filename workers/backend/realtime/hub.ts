@@ -1,27 +1,4 @@
 import { eq, asc, and } from 'drizzle-orm';
-
-// Replace verbose FILE/PATCH blocks in assistant messages with a short summary.
-// The current file state is already injected by buildEditPrompt, so the model
-// does not need to re-read old file content from history.
-function summariseAssistantMsg(content: string): string {
-	const filePaths: string[] = [];
-	const patchPaths: string[] = [];
-	const stripped = content
-		.replace(/===\s*FILE:\s*(.+?)\s*===[\s\S]*?===\s*END FILE\s*===/g, (_, p) => {
-			filePaths.push(p.trim());
-			return '';
-		})
-		.replace(/===\s*PATCH:\s*(.+?)\s*===[\s\S]*?===\s*END PATCH\s*===/g, (_, p) => {
-			patchPaths.push(p.trim());
-			return '';
-		})
-		.trim();
-	const parts: string[] = [];
-	if (filePaths.length) parts.push(`[Wrote: ${filePaths.join(', ')}]`);
-	if (patchPaths.length) parts.push(`[Patched: ${patchPaths.join(', ')}]`);
-	const summary = parts.join(' ');
-	return stripped ? (summary ? `${stripped}\n${summary}` : stripped) : summary || '[No file output]';
-}
 import { createDb } from '../../../src/lib/server/db';
 import { generations, generatedFiles, messages, projects, users } from '../../../src/lib/server/db/schema';
 import { streamChat, estimateTokens, DEFAULT_MODEL } from '../../../src/lib/server/ai';
@@ -202,13 +179,16 @@ export class RealtimeHub {
 					if (m.role === 'user') return ancestorReqMsgIds.has(m.id);
 					return false;
 				});
+				// Only include user messages in history. Assistant messages contain
+				// verbose FILE/PATCH blocks that confuse the model into mimicking
+				// that format instead of generating real output. The current file
+				// state is already provided in full by buildEditPrompt, so the model
+				// only needs to know the sequence of user requests.
 				historyMsgs.push(
-					...filtered.slice(-20).map((m) => ({
-						role: m.role as 'user' | 'assistant',
-						// Strip verbose file blocks from assistant messages — current file
-						// state is already in the system prompt via buildEditPrompt.
-						content: m.role === 'assistant' ? summariseAssistantMsg(m.content) : m.content
-					}))
+					...filtered
+						.filter((m) => m.role === 'user')
+						.slice(-10)
+						.map((m) => ({ role: 'user' as const, content: m.content }))
 				);
 			}
 

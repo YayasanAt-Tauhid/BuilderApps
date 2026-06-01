@@ -9,14 +9,23 @@ import { getUsage } from '$lib/server/usage';
 export const load: PageServerLoad = async (event) => {
 	const user = requireUser(event);
 	const db = getDb(event);
-	const usage = await getUsage(db, user.id);
-	return { usage, preferences: { locale: user.locale, theme: user.theme } };
+
+	const [usage, githubRow] = await Promise.all([
+		getUsage(db, user.id),
+		db.select({ githubLogin: users.githubLogin }).from(users).where(eq(users.id, user.id)).limit(1)
+	]);
+
+	return {
+		usage,
+		preferences: { locale: user.locale, theme: user.theme },
+		githubLogin: githubRow[0]?.githubLogin ?? null
+	};
 };
 
 export const actions: Actions = {
 	// Dark mode + locale preference (PRD Consistency Matrix: handled via a form action,
 	// not a dedicated REST endpoint — by design).
-	default: async (event) => {
+	savePreferences: async (event) => {
 		const user = requireUser(event);
 		const form = await event.request.formData();
 		const result = parse(updatePreferencesSchema, {
@@ -33,6 +42,16 @@ export const actions: Actions = {
 				...(result.data.theme ? { theme: result.data.theme } : {}),
 				updatedAt: Date.now()
 			})
+			.where(eq(users.id, user.id));
+		return { success: true };
+	},
+
+	disconnectGithub: async (event) => {
+		const user = requireUser(event);
+		const db = getDb(event);
+		await db
+			.update(users)
+			.set({ githubAccessToken: null, githubLogin: null, updatedAt: Date.now() })
 			.where(eq(users.id, user.id));
 		return { success: true };
 	}

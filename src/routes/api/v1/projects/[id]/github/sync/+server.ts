@@ -1,0 +1,61 @@
+import { and, eq, sql } from 'drizzle-orm';
+import type { RequestHandler } from './$types';
+import { ok, errors } from '$lib/server/api';
+import { requireOwnedProject, getEnv } from '$lib/server/context';
+import { generatedFiles, users } from '$lib/server/db/schema';
+import { getFileText } from '$lib/server/storage/r2';
+import { pushFilesToRepo } from '$lib/server/github';
+
+// Push the latest generated files to a GitHub repo named after the project slug.
+export const POST: RequestHandler = async (event) => {
+	const { db, user, project } = await requireOwnedProject(event, event.params.id);
+
+	// GitHub token lives in the users table (not in the session cache).
+	const rows = await db
+		.select({ githubAccessToken: users.githubAccessToken, githubLogin: users.githubLogin })
+		.from(users)
+		.where(eq(users.id, user.id))
+		.limit(1);
+
+	const { githubAccessToken, githubLogin } = rows[0] ?? {};
+	if (!githubAccessToken || !githubLogin) {
+		return errors.forbidden();
+	}
+
+	// Determine latest generated version.
+	const [{ latest }] = await db
+		.select({ latest: sql<number>`coalesce(max(${generatedFiles.version}), 0)` })
+		.from(generatedFiles)
+		.where(eq(generatedFiles.projectId, project.id));
+
+	const version = Number(latest);
+	if (version === 0) return errors.notFound('No generated files to sync.');
+
+	const fileRows = await db
+		.select({ path: generatedFiles.path, r2Key: generatedFiles.r2Key })
+		.from(generatedFiles)
+		.where(and(eq(generatedFiles.projectId, project.id), eq(generatedFiles.version, version)));
+
+	// Fetch content from R2.
+	const env = getEnv(event);
+	const fileContents = await Promise.all(
+		fileRows.map(async (f) => ({
+			path: f.path,
+			content: (await getFileText(env.BUCKET, f.r2Key)) ?? ''
+		}))
+	);
+
+	const result = await pushFilesToRepo(
+		githubAccessToken,
+		githubLogin,
+		project.slug,
+		fileContents,
+		`BuilderPro: ${project.name} v${version}`
+	);
+
+	if ('error' in result) {
+		return errors.internal();
+	}
+
+	return ok({ repoUrl: result.repoUrl });
+};

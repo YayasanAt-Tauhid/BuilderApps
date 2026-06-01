@@ -13,6 +13,9 @@
 	"observability": {
 		"enabled": true
 	},
+	"vars": {
+		"GITHUB_CLIENT_ID": "Ov23li4GcZI2jKTndNbI"
+	},
 	"d1_databases": [
 		{
 			"binding": "DB",

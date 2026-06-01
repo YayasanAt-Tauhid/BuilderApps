@@ -18,4 +18,7 @@ export interface Env {
 	ASSETS: Fetcher;
 	/** Backend worker only — the app worker does not hold this secret. */
 	OPENROUTER_API_KEY?: string;
+	/** GitHub OAuth App credentials (app worker — needed for the OAuth callback flow). */
+	GITHUB_CLIENT_ID?: string;
+	GITHUB_CLIENT_SECRET?: string;
 }

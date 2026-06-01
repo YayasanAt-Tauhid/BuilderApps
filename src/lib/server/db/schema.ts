@@ -24,6 +24,8 @@ export const users = sqliteTable('users', {
 	theme: text('theme', { enum: ['system', 'light', 'dark'] })
 		.notNull()
 		.default('system'),
+	githubAccessToken: text('github_access_token'),
+	githubLogin: text('github_login'),
 	...timestamps
 });
 

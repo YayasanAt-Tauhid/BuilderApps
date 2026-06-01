@@ -76,6 +76,11 @@
 	border-color: var(--border);
 }
 
+html {
+	scroll-behavior: smooth;
+	-webkit-text-size-adjust: 100%;
+}
+
 body {
 	background-color: var(--background);
 	color: var(--foreground);
@@ -85,4 +90,32 @@ body {
 		'Segoe UI',
 		Roboto,
 		sans-serif;
+	/* Prevent layout shift from scrollbar on desktop */
+	scrollbar-gutter: stable;
+}
+
+/* Ensure touch targets are at least 44px */
+button, a, [role="button"] {
+	min-height: 44px;
+	min-width: 44px;
+}
+/* But allow small inline decorative elements */
+button.no-min, a.no-min {
+	min-height: unset;
+	min-width: unset;
+}
+
+/* Smooth textarea resize */
+textarea {
+	transition: height 0.1s ease;
+}
+
+/* Better tap highlight on mobile */
+a, button {
+	-webkit-tap-highlight-color: transparent;
+}
+
+/* Prevent horizontal overflow on mobile */
+main {
+	overflow-x: hidden;
 }

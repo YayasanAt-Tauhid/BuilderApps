@@ -27,5 +27,10 @@ export const load: PageServerLoad = async (event) => {
 		db.select({ githubLogin: users.githubLogin }).from(users).where(eq(users.id, user.id)).limit(1)
 	]);
 
-	return { project, version, files, githubLogin: githubRow[0]?.githubLogin ?? null };
+	return {
+		project,
+		version,
+		files,
+		githubLogin: githubRow[0]?.githubLogin ?? null
+	};
 };

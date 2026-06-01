@@ -15,6 +15,13 @@
       "when": 1780281053028,
       "tag": "0001_dark_corsair",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1780286864937,
+      "tag": "0002_square_paper_doll",
+      "breakpoints": true
     }
   ]
 }

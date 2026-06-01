@@ -82,7 +82,7 @@ export async function pushFilesToRepo(
 	repoName: string,
 	files: FileContent[],
 	commitMessage: string
-): Promise<{ repoUrl: string } | { error: string }> {
+): Promise<{ repoUrl: string; commitSha: string } | { error: string }> {
 	const repoPath = `/repos/${owner}/${repoName}`;
 
 	// 1. Ensure repo exists — create with auto_init so git storage is ready.
@@ -172,7 +172,7 @@ export async function pushFilesToRepo(
 	);
 	if (!update.ok) return { error: (update as { ok: false; message: string }).message };
 
-	return { repoUrl: `https://github.com/${owner}/${repoName}` };
+	return { repoUrl: `https://github.com/${owner}/${repoName}`, commitSha: newCommit.data.sha };
 }
 
 /**

@@ -57,16 +57,19 @@ export const POST: RequestHandler = async (event) => {
 		return errors.internal();
 	}
 
-	// Enable GitHub Pages and persist the URL so the preview can use it.
+	// Enable GitHub Pages and persist sync metadata.
 	const pages = await enableGithubPages(githubAccessToken, githubLogin, project.slug, 'main');
 	const pagesUrl = 'pagesUrl' in pages ? pages.pagesUrl : null;
 
-	if (pagesUrl) {
-		await db
-			.update(projects)
-			.set({ githubPagesUrl: pagesUrl, updatedAt: Date.now() })
-			.where(eq(projects.id, project.id));
-	}
+	await db
+		.update(projects)
+		.set({
+			githubSyncedVersion: version,
+			githubLastCommitSha: result.commitSha,
+			...(pagesUrl ? { githubPagesUrl: pagesUrl } : {}),
+			updatedAt: Date.now()
+		})
+		.where(eq(projects.id, project.id));
 
-	return ok({ repoUrl: result.repoUrl, pagesUrl });
+	return ok({ repoUrl: result.repoUrl, pagesUrl, syncedVersion: version, commitSha: result.commitSha });
 };

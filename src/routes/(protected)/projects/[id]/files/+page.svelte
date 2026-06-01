@@ -9,12 +9,17 @@
 
 	let syncing = $state(false);
 	let syncError = $state<string | null>(null);
-	// Tracks the Pages URL after a successful sync (persisted in DB via server data).
 	let pagesUrl = $state(data.project.githubPagesUrl ?? null);
+	let syncedVersion = $state(data.project.githubSyncedVersion ?? null);
+	let commitSha = $state(data.project.githubLastCommitSha ?? null);
 
 	const repoUrl = $derived(
 		data.githubLogin ? `https://github.com/${data.githubLogin}/${data.project.slug}` : null
 	);
+	const commitUrl = $derived(
+		repoUrl && commitSha ? `${repoUrl}/commit/${commitSha}` : null
+	);
+	const versionInSync = $derived(syncedVersion !== null && syncedVersion === data.version);
 
 	async function open(file: { id: string; path: string }) {
 		selected = file;
@@ -33,8 +38,12 @@
 				method: 'POST'
 			});
 			if (res.ok) {
-				const json = (await res.json()) as { data: { repoUrl: string; pagesUrl: string | null } };
+				const json = (await res.json()) as {
+					data: { repoUrl: string; pagesUrl: string | null; syncedVersion: number; commitSha: string };
+				};
 				pagesUrl = json.data.pagesUrl ?? pagesUrl;
+				syncedVersion = json.data.syncedVersion;
+				commitSha = json.data.commitSha;
 			} else {
 				const json = (await res.json()) as { error?: { message?: string } };
 				syncError = json.error?.message ?? 'Sync failed.';
@@ -55,7 +64,24 @@
 	>
 	<h1 class="text-xl font-bold">{m.project_files()}</h1>
 	{#if data.version > 0}
-		<span class="rounded-full bg-muted px-2 py-0.5 text-xs">v{data.version}</span>
+		{#if commitUrl && versionInSync}
+			<a
+				href={commitUrl}
+				target="_blank"
+				rel="noopener noreferrer"
+				class="rounded-full bg-green-500/10 px-2 py-0.5 text-xs font-medium text-green-700 hover:underline dark:text-green-400"
+				title="View commit on GitHub"
+			>
+				v{data.version} ↗
+			</a>
+		{:else if syncedVersion !== null && !versionInSync}
+			<span class="rounded-full bg-muted px-2 py-0.5 text-xs">v{data.version}</span>
+			<span class="rounded-full bg-yellow-500/10 px-2 py-0.5 text-xs text-yellow-700 dark:text-yellow-400">
+				GitHub: v{syncedVersion}
+			</span>
+		{:else}
+			<span class="rounded-full bg-muted px-2 py-0.5 text-xs">v{data.version}</span>
+		{/if}
 	{/if}
 
 	<div class="ml-auto flex items-center gap-2">

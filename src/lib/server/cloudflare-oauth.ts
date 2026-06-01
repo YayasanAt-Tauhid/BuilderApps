@@ -123,3 +123,43 @@ export async function createPagesDeployToken(
 	}
 	return tokenResult.data.value;
 }
+
+/**
+ * Create a scoped Cloudflare Pages deploy token using BuilderPro's admin master token.
+ * The created token is scoped to Pages:Edit + Account:Read for the specific accountId only —
+ * the master token itself never leaves the Worker and is never stored in GitHub secrets.
+ */
+export async function createAdminScopedPagesToken(
+	masterToken: string,
+	accountId: string,
+	projectSlug: string
+): Promise<string | null> {
+	const pgResult = await cfRequest<PermissionGroup[]>(masterToken, 'GET', '/user/tokens/permission_groups');
+	if (!pgResult.ok) return null;
+
+	const pagesEdit = pgResult.data.find((pg) => pg.name === 'Cloudflare Pages:Edit');
+	const accountRead = pgResult.data.find((pg) => pg.name === 'Account Settings:Read');
+	if (!pagesEdit) return null;
+
+	const policies = [
+		{
+			effect: 'allow',
+			resources: { [`com.cloudflare.api.account.${accountId}`]: '*' },
+			permission_groups: [
+				{ id: pagesEdit.id },
+				...(accountRead ? [{ id: accountRead.id }] : [])
+			]
+		}
+	];
+
+	const tokenResult = await cfRequest<{ value: string }>(masterToken, 'POST', '/user/tokens', {
+		name: `BuilderPro Deploy — ${projectSlug}`,
+		policies
+	});
+
+	if (!tokenResult.ok) {
+		console.error(`[cf] createAdminScopedPagesToken failed: ${tokenResult.message}`);
+		return null;
+	}
+	return tokenResult.data.value;
+}

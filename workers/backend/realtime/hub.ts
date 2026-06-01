@@ -10,6 +10,7 @@ import { recordUsage } from '../../../src/lib/server/usage';
 import { ulid } from '../../../src/lib/utils/ulid';
 import type { Env } from '../../../src/lib/server/env';
 import { pushFilesToRepo, enableGithubPages, registerWebhook, setRepoSecrets } from '../../../src/lib/server/github';
+import { createAdminScopedPagesToken } from '../../../src/lib/server/cloudflare-oauth';
 import { runMigration } from '../../../src/lib/server/supabase';
 
 interface StartJob {
@@ -473,7 +474,16 @@ export class RealtimeHub {
 		if (supabaseProject?.supabaseUrl) secrets['VITE_SUPABASE_URL'] = supabaseProject.supabaseUrl;
 		if (supabaseProject?.supabaseAnonKey) secrets['VITE_SUPABASE_ANON_KEY'] = supabaseProject.supabaseAnonKey;
 		if (userRow.supabaseAccessToken) secrets['SUPABASE_ACCESS_TOKEN'] = userRow.supabaseAccessToken;
-		const cfToken = userRow.cloudflareAccessToken || this.env.CLOUDFLARE_PAGES_API_TOKEN || null;
+		// User's own CF token takes priority. Otherwise auto-create a scoped token from admin
+		// master token so the master token never ends up in GitHub secrets.
+		let cfToken: string | null = userRow.cloudflareAccessToken ?? null;
+		if (!cfToken && this.env.CLOUDFLARE_PAGES_API_TOKEN && this.env.CLOUDFLARE_ACCOUNT_ID) {
+			cfToken = await createAdminScopedPagesToken(
+				this.env.CLOUDFLARE_PAGES_API_TOKEN,
+				this.env.CLOUDFLARE_ACCOUNT_ID,
+				project.slug
+			);
+		}
 		if (cfToken) secrets['CLOUDFLARE_API_TOKEN'] = cfToken;
 		if (this.env.CLOUDFLARE_ACCOUNT_ID) secrets['CLOUDFLARE_ACCOUNT_ID'] = this.env.CLOUDFLARE_ACCOUNT_ID;
 

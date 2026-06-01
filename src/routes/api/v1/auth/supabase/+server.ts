@@ -20,6 +20,7 @@ export const GET: RequestHandler = async (event) => {
 		client_id: env.SUPABASE_CLIENT_ID,
 		redirect_uri: redirectUri,
 		response_type: 'code',
+		scope: 'projects_read',
 		state
 	});
 

@@ -7,6 +7,8 @@
 
 	const projectId = $derived(page.params.id);
 	const pagesUrl = $derived(data.project.githubPagesUrl);
+	// Bust iframe cache on every page load so restore/generate shows fresh content.
+	const cacheBust = Date.now();
 </script>
 
 <svelte:head><title>{m.project_preview()}</title></svelte:head>
@@ -52,7 +54,7 @@
 	</p>
 	<iframe
 		title="Frontend preview"
-		src="/api/v1/projects/{projectId}/preview"
+		src="/api/v1/projects/{projectId}/preview?t={cacheBust}"
 		sandbox="allow-scripts"
 		class="h-[70vh] w-full rounded-lg border bg-white"
 	></iframe>

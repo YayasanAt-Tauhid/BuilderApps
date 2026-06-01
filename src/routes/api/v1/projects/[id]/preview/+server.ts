@@ -88,6 +88,7 @@ export const GET: RequestHandler = async (event) => {
 	return new Response(html, {
 		headers: {
 			'Content-Type': 'text/html; charset=utf-8',
+			'Cache-Control': 'no-store',
 			// Sandboxed (no same-origin: cannot touch the app), but inline CSS/JS and CDN
 			// assets are allowed so the generated page renders with styling.
 			'Content-Security-Policy': [

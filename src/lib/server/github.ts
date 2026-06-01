@@ -155,7 +155,7 @@ export async function pushFilesToRepo(
 	const treeResult = await githubRequest<{ sha: string }>(token, 'POST', `${repoPath}/git/trees`, {
 		tree: blobs
 	});
-	if (!treeResult.ok) return { error: `[step4-tree] ${treeResult.message}` };
+	if (!treeResult.ok) return { error: `[step4-tree:${treeResult.status}:owner=${owner}:repo=${repoName}:files=${blobs.length}] ${treeResult.message}` };
 
 	// 5. Create commit.
 	const newCommit = await githubRequest<{ sha: string }>(token, 'POST', `${repoPath}/git/commits`, {

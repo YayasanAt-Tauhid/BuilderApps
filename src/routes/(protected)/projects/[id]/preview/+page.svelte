@@ -23,30 +23,31 @@
 	{#if pagesUrl}
 		<span class="flex items-center gap-1.5 rounded-full bg-green-500/10 px-2.5 py-0.5 text-xs font-medium text-green-700 dark:text-green-400">
 			<span class="size-1.5 rounded-full bg-green-500"></span>
-			GitHub Pages
+			Live
 		</span>
 		<a href={pagesUrl} target="_blank" rel="noopener noreferrer"
 			class="ml-auto rounded-lg border px-3 py-1.5 text-sm text-muted-foreground transition hover:bg-muted">
 			↗ Open
 		</a>
-	{:else}
-		<span class="flex items-center gap-1.5 rounded-full bg-muted px-2.5 py-0.5 text-xs font-medium text-muted-foreground">
-			<span class="size-1.5 rounded-full bg-muted-foreground/50"></span>
-			Sandboxed
-		</span>
 	{/if}
 </div>
 
-{#if !pagesUrl}
-	<p class="mb-3 text-sm text-muted-foreground">
-		Sandboxed preview — frontend only.
-		<a href="/projects/{projectId}/files" class="text-primary underline">Push to GitHub</a> for a live URL.
-	</p>
+{#if pagesUrl}
+	<iframe
+		title="Preview"
+		src="{pagesUrl}?t={cacheBust}"
+		class="h-[calc(100dvh-12rem)] min-h-64 w-full rounded-2xl border bg-white shadow-sm sm:h-[75vh]"
+	></iframe>
+{:else}
+	<div class="flex flex-col items-center gap-4 rounded-2xl border border-dashed py-20 text-center">
+		<div class="text-4xl">🚀</div>
+		<div>
+			<p class="font-medium">Belum ada preview</p>
+			<p class="mt-1 text-sm text-muted-foreground">Push ke GitHub untuk deploy dan lihat live preview.</p>
+		</div>
+		<a href="/projects/{projectId}/files"
+			class="rounded-xl bg-foreground px-4 py-2 text-sm font-medium text-background transition hover:opacity-80">
+			Push ke GitHub
+		</a>
+	</div>
 {/if}
-
-<iframe
-	title="Preview"
-	src={pagesUrl ? `${pagesUrl}?t=${cacheBust}` : `/api/v1/projects/${projectId}/preview?t=${cacheBust}`}
-	sandbox={pagesUrl ? undefined : 'allow-scripts'}
-	class="h-[calc(100dvh-12rem)] min-h-64 w-full rounded-2xl border bg-white shadow-sm sm:h-[75vh]"
-></iframe>

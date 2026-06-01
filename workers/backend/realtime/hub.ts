@@ -1,4 +1,27 @@
 import { eq, asc, and } from 'drizzle-orm';
+
+// Replace verbose FILE/PATCH blocks in assistant messages with a short summary.
+// The current file state is already injected by buildEditPrompt, so the model
+// does not need to re-read old file content from history.
+function summariseAssistantMsg(content: string): string {
+	const filePaths: string[] = [];
+	const patchPaths: string[] = [];
+	const stripped = content
+		.replace(/===\s*FILE:\s*(.+?)\s*===[\s\S]*?===\s*END FILE\s*===/g, (_, p) => {
+			filePaths.push(p.trim());
+			return '';
+		})
+		.replace(/===\s*PATCH:\s*(.+?)\s*===[\s\S]*?===\s*END PATCH\s*===/g, (_, p) => {
+			patchPaths.push(p.trim());
+			return '';
+		})
+		.trim();
+	const parts: string[] = [];
+	if (filePaths.length) parts.push(`[Wrote: ${filePaths.join(', ')}]`);
+	if (patchPaths.length) parts.push(`[Patched: ${patchPaths.join(', ')}]`);
+	const summary = parts.join(' ');
+	return stripped ? (summary ? `${stripped}\n${summary}` : stripped) : summary || '[No file output]';
+}
 import { createDb } from '../../../src/lib/server/db';
 import { generations, generatedFiles, messages, projects, users } from '../../../src/lib/server/db/schema';
 import { streamChat, estimateTokens, DEFAULT_MODEL } from '../../../src/lib/server/ai';
@@ -179,7 +202,14 @@ export class RealtimeHub {
 					if (m.role === 'user') return ancestorReqMsgIds.has(m.id);
 					return false;
 				});
-				historyMsgs.push(...filtered.slice(-20).map((m) => ({ role: m.role as 'user' | 'assistant', content: m.content })));
+				historyMsgs.push(
+					...filtered.slice(-20).map((m) => ({
+						role: m.role as 'user' | 'assistant',
+						// Strip verbose file blocks from assistant messages — current file
+						// state is already in the system prompt via buildEditPrompt.
+						content: m.role === 'assistant' ? summariseAssistantMsg(m.content) : m.content
+					}))
+				);
 			}
 
 			// ── 3. Choose system prompt ───────────────────────────────────────────

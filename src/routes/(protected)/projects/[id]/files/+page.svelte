@@ -259,19 +259,19 @@
 	</div>
 {/each}
 
-<!-- SvelteKit deploy info -->
+<!-- SvelteKit + Supabase deploy info -->
 {#if deployInfo}
-	<div class="mb-4 flex items-start gap-3 rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm dark:border-blue-900 dark:bg-blue-950/40">
-		<svg xmlns="http://www.w3.org/2000/svg" class="mt-0.5 size-4 shrink-0 text-blue-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg>
-		<div>
-			<p class="font-medium text-blue-800 dark:text-blue-300">SvelteKit — GitHub Actions diperlukan</p>
-			<p class="mt-0.5 text-blue-700 dark:text-blue-400">{deployInfo}</p>
-			<ol class="mt-2 space-y-0.5 text-xs text-blue-600 dark:text-blue-500">
-				<li>1. Klik <strong>Push to GitHub</strong> untuk upload source code</li>
-				<li>2. Tambahkan secret <code class="rounded bg-blue-100 px-1 dark:bg-blue-900">CLOUDFLARE_API_TOKEN</code> di Settings → Secrets repo GitHub</li>
-				<li>3. GitHub Actions otomatis build + deploy ke Cloudflare Pages</li>
-			</ol>
+	<div class="mb-4 rounded-xl border border-blue-200 bg-blue-50 px-4 py-4 text-sm dark:border-blue-900 dark:bg-blue-950/40">
+		<div class="mb-2 flex items-center gap-2">
+			<svg xmlns="http://www.w3.org/2000/svg" class="size-4 text-blue-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg>
+			<p class="font-semibold text-blue-800 dark:text-blue-300">SvelteKit + Supabase — Deploy via GitHub Actions</p>
 		</div>
+		<ol class="space-y-1 text-xs text-blue-700 dark:text-blue-400">
+			<li><strong>1.</strong> Buat project di <a href="https://supabase.com" target="_blank" class="underline">supabase.com</a>, copy <code class="rounded bg-blue-100 px-1 dark:bg-blue-900">Project URL</code> + <code class="rounded bg-blue-100 px-1 dark:bg-blue-900">anon key</code></li>
+			<li><strong>2.</strong> Buat tabel di Supabase sesuai struktur yang di-generate (lihat <code class="rounded bg-blue-100 px-1 dark:bg-blue-900">src/lib/types.ts</code>)</li>
+			<li><strong>3.</strong> Klik <strong>Push to GitHub</strong> → tambahkan 3 GitHub Secrets: <code class="rounded bg-blue-100 px-1 dark:bg-blue-900">CLOUDFLARE_API_TOKEN</code>, <code class="rounded bg-blue-100 px-1 dark:bg-blue-900">VITE_SUPABASE_URL</code>, <code class="rounded bg-blue-100 px-1 dark:bg-blue-900">VITE_SUPABASE_ANON_KEY</code></li>
+			<li><strong>4.</strong> GitHub Actions otomatis build + deploy ke Cloudflare Pages 🚀</li>
+		</ol>
 	</div>
 {/if}
 

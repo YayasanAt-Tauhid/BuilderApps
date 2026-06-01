@@ -4,6 +4,7 @@ import { generations, generatedFiles, messages, projects, users } from '../../..
 import { streamChat, estimateTokens, DEFAULT_MODEL } from '../../../src/lib/server/ai';
 import { parseOutput, applyPatch } from '../../../src/lib/server/ai/parser';
 import { buildEditPrompt, buildNewPrompt, type SupabaseContext } from '../../../src/lib/server/ai/prompts';
+import { buildTemplateFiles } from '../../../src/lib/server/ai/templates';
 import { fileKey, putFile, getFileText, contentHash } from '../../../src/lib/server/storage/r2';
 import { recordUsage } from '../../../src/lib/server/usage';
 import { ulid } from '../../../src/lib/utils/ulid';
@@ -14,6 +15,7 @@ interface StartJob {
 	generationId: string;
 	projectId: string;
 	userId: string;
+	slug: string;
 	version: number;
 	/** null = first generation; otherwise the version to use as edit base. */
 	prevVersion: number | null;
@@ -193,12 +195,23 @@ export class RealtimeHub {
 				);
 			}
 
-			// ── 3. Choose system prompt ───────────────────────────────────────────
+			// ── 3. Pre-inject boilerplate for new projects (saves ~1000 tokens) ─────
+			// Template files (package.json, svelte.config.js, vite.config.ts, etc.)
+			// are identical across all projects — no need for the AI to generate them.
+			// They are written to finalFiles before the AI call so the AI only needs
+			// to generate app-specific files (+page.svelte, types.ts, supabase.ts, etc.)
+			if (!isEdit) {
+				for (const [path, content] of buildTemplateFiles(job.slug)) {
+					existingFiles.set(path, content);
+				}
+			}
+
+			// ── 4. Choose system prompt ───────────────────────────────────────────
 			const systemPrompt = isEdit
 				? buildEditPrompt(existingFiles, job.supabase)
 				: buildNewPrompt(job.supabase);
 
-			// ── 4. Stream generation ──────────────────────────────────────────────
+			// ── 5. Stream generation ──────────────────────────────────────────────
 			let full = '';
 			for await (const delta of streamChat({
 				apiKey: this.env.OPENROUTER_API_KEY,
@@ -215,7 +228,7 @@ export class RealtimeHub {
 				this.writeAll(live, this.sse('token', { content: delta.content }));
 			}
 
-			// ── 5. Parse FILE + PATCH blocks ──────────────────────────────────────
+			// ── 6. Parse FILE + PATCH blocks ──────────────────────────────────────
 			const { files: newFiles, patches } = parseOutput(full);
 			const finalFiles = new Map(existingFiles);
 
@@ -234,7 +247,7 @@ export class RealtimeHub {
 				}
 			}
 
-			// ── 6. Fallback: retry failed files with current content as context ────
+			// ── 7. Fallback: retry failed files with current content as context ────
 			if (failedPaths.length > 0) {
 				// Include the current file contents so the AI can rewrite them correctly.
 				const failedFileBlocks = failedPaths
@@ -263,7 +276,7 @@ export class RealtimeHub {
 				for (const f of retryFiles) finalFiles.set(f.path, f.content);
 			}
 
-			// ── 7. Persist to R2 + D1 ─────────────────────────────────────────────
+			// ── 8. Persist to R2 + D1 ─────────────────────────────────────────────
 			const ts = Date.now();
 			for (const [path, content] of finalFiles) {
 				const key = fileKey(job.projectId, job.version, path);

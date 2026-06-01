@@ -20,7 +20,7 @@ export const GET: RequestHandler = async (event) => {
 		client_id: env.CLOUDFLARE_CLIENT_ID,
 		redirect_uri: redirectUri,
 		response_type: 'code',
-		scope: 'account:read user:read offline_access',
+		scope: 'account:read offline_access',
 		state
 	});
 

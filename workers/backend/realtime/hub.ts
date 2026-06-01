@@ -1,6 +1,6 @@
 import { eq, asc, and } from 'drizzle-orm';
 import { createDb } from '../../../src/lib/server/db';
-import { generations, generatedFiles, messages, projects } from '../../../src/lib/server/db/schema';
+import { generations, generatedFiles, messages, projects, users } from '../../../src/lib/server/db/schema';
 import { streamChat, estimateTokens, DEFAULT_MODEL } from '../../../src/lib/server/ai';
 import { parseOutput, applyPatch } from '../../../src/lib/server/ai/parser';
 import { buildEditPrompt, PROMPT_NEW } from '../../../src/lib/server/ai/prompts';
@@ -8,6 +8,7 @@ import { fileKey, putFile, getFileText, contentHash } from '../../../src/lib/ser
 import { recordUsage } from '../../../src/lib/server/usage';
 import { ulid } from '../../../src/lib/utils/ulid';
 import type { Env } from '../../../src/lib/server/env';
+import { pushFilesToRepo, enableGithubPages } from '../../../src/lib/server/github';
 
 interface StartJob {
 	generationId: string;
@@ -262,6 +263,9 @@ export class RealtimeHub {
 			this.writeAll(live, this.sse('done', live.result));
 			for (const w of live.writers) w.close().catch(() => {});
 			this.scheduleCleanup(job.generationId);
+
+			// Auto-push to GitHub if the project was previously synced.
+			this.autoSyncGithub(db, job).catch(() => {});
 		} catch (err) {
 			console.error('generation failed', err);
 			await this.fail(db, job, live, 'Generation failed. Please try again.');
@@ -293,5 +297,74 @@ export class RealtimeHub {
 
 	private scheduleCleanup(gid: string): void {
 		setTimeout(() => this.live.delete(gid), 60_000);
+	}
+
+	private async autoSyncGithub(
+		db: ReturnType<typeof createDb>,
+		job: StartJob
+	): Promise<void> {
+		// Only auto-push if the project was previously connected to GitHub.
+		const [project] = await db
+			.select({
+				slug: projects.slug,
+				name: projects.name,
+				githubPagesUrl: projects.githubPagesUrl
+			})
+			.from(projects)
+			.where(eq(projects.id, job.projectId))
+			.limit(1);
+
+		if (!project?.githubPagesUrl) return;
+
+		const [userRow] = await db
+			.select({ githubAccessToken: users.githubAccessToken, githubLogin: users.githubLogin })
+			.from(users)
+			.where(eq(users.id, job.userId))
+			.limit(1);
+
+		if (!userRow?.githubAccessToken || !userRow.githubLogin) return;
+
+		// Fetch the files we just generated.
+		const fileRows = await db
+			.select({ path: generatedFiles.path, r2Key: generatedFiles.r2Key })
+			.from(generatedFiles)
+			.where(
+				and(eq(generatedFiles.projectId, job.projectId), eq(generatedFiles.version, job.version))
+			);
+
+		const fileContents = await Promise.all(
+			fileRows.map(async (f) => ({
+				path: f.path,
+				content: (await getFileText(this.env.BUCKET, f.r2Key)) ?? ''
+			}))
+		);
+
+		const result = await pushFilesToRepo(
+			userRow.githubAccessToken,
+			userRow.githubLogin,
+			project.slug,
+			fileContents,
+			`BuilderPro: ${project.name} v${job.version}`
+		);
+
+		if ('error' in result) return;
+
+		const pages = await enableGithubPages(
+			userRow.githubAccessToken,
+			userRow.githubLogin,
+			project.slug,
+			'main'
+		);
+		const pagesUrl = 'pagesUrl' in pages ? pages.pagesUrl : null;
+
+		await db
+			.update(projects)
+			.set({
+				githubSyncedVersion: job.version,
+				githubLastCommitSha: result.commitSha,
+				...(pagesUrl ? { githubPagesUrl: pagesUrl } : {}),
+				updatedAt: Date.now()
+			})
+			.where(eq(projects.id, job.projectId));
 	}
 }

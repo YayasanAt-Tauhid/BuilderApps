@@ -4,7 +4,7 @@ import { ok, errors } from '$lib/server/api';
 import { requireOwnedProject, getEnv } from '$lib/server/context';
 import { generatedFiles, projects, users } from '$lib/server/db/schema';
 import { getFileText } from '$lib/server/storage/r2';
-import { pushFilesToRepo, enableGithubPages } from '$lib/server/github';
+import { pushFilesToRepo, enableGithubPages, registerWebhook } from '$lib/server/github';
 
 // Push the latest generated files to a GitHub repo named after the project slug.
 export const POST: RequestHandler = async (event) => {
@@ -57,9 +57,23 @@ export const POST: RequestHandler = async (event) => {
 		return errors.internal();
 	}
 
-	// Enable GitHub Pages and persist sync metadata.
-	const pages = await enableGithubPages(githubAccessToken, githubLogin, project.slug, 'main');
+	// Enable GitHub Pages and register webhook (if not already done).
+	const [pages, webhookResult] = await Promise.all([
+		enableGithubPages(githubAccessToken, githubLogin, project.slug, 'main'),
+		project.githubWebhookId
+			? Promise.resolve(null)
+			: registerWebhook(
+					githubAccessToken,
+					githubLogin,
+					project.slug,
+					`${env.APP_URL ?? ''}/api/v1/webhooks/github`,
+					env.GITHUB_WEBHOOK_SECRET ?? ''
+				)
+	]);
+
 	const pagesUrl = 'pagesUrl' in pages ? pages.pagesUrl : null;
+	const webhookId =
+		webhookResult && 'id' in webhookResult ? webhookResult.id : project.githubWebhookId;
 
 	await db
 		.update(projects)
@@ -67,6 +81,7 @@ export const POST: RequestHandler = async (event) => {
 			githubSyncedVersion: version,
 			githubLastCommitSha: result.commitSha,
 			...(pagesUrl ? { githubPagesUrl: pagesUrl } : {}),
+			...(webhookId ? { githubWebhookId: webhookId } : {}),
 			updatedAt: Date.now()
 		})
 		.where(eq(projects.id, project.id));

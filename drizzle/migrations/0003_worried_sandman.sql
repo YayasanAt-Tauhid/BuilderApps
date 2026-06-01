@@ -1,0 +1,1 @@
+ALTER TABLE `projects` ADD `github_webhook_id` integer;

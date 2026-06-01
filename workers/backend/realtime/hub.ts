@@ -8,7 +8,7 @@ import { fileKey, putFile, getFileText, contentHash } from '../../../src/lib/ser
 import { recordUsage } from '../../../src/lib/server/usage';
 import { ulid } from '../../../src/lib/utils/ulid';
 import type { Env } from '../../../src/lib/server/env';
-import { pushFilesToRepo, enableGithubPages } from '../../../src/lib/server/github';
+import { pushFilesToRepo, enableGithubPages, registerWebhook } from '../../../src/lib/server/github';
 
 interface StartJob {
 	generationId: string;
@@ -308,7 +308,8 @@ export class RealtimeHub {
 			.select({
 				slug: projects.slug,
 				name: projects.name,
-				githubPagesUrl: projects.githubPagesUrl
+				githubPagesUrl: projects.githubPagesUrl,
+				githubWebhookId: projects.githubWebhookId
 			})
 			.from(projects)
 			.where(eq(projects.id, job.projectId))
@@ -349,13 +350,19 @@ export class RealtimeHub {
 
 		if ('error' in result) return;
 
-		const pages = await enableGithubPages(
-			userRow.githubAccessToken,
-			userRow.githubLogin,
-			project.slug,
-			'main'
-		);
+		const webhookUrl = `${this.env.APP_URL ?? ''}/api/v1/webhooks/github`;
+		const webhookSecret = this.env.GITHUB_WEBHOOK_SECRET ?? '';
+
+		const [pages, webhookResult] = await Promise.all([
+			enableGithubPages(userRow.githubAccessToken, userRow.githubLogin, project.slug, 'main'),
+			project.githubWebhookId
+				? Promise.resolve(null)
+				: registerWebhook(userRow.githubAccessToken, userRow.githubLogin, project.slug, webhookUrl, webhookSecret)
+		]);
+
 		const pagesUrl = 'pagesUrl' in pages ? pages.pagesUrl : null;
+		const webhookId =
+			webhookResult && 'id' in webhookResult ? webhookResult.id : project.githubWebhookId;
 
 		await db
 			.update(projects)
@@ -363,6 +370,7 @@ export class RealtimeHub {
 				githubSyncedVersion: job.version,
 				githubLastCommitSha: result.commitSha,
 				...(pagesUrl ? { githubPagesUrl: pagesUrl } : {}),
+				...(webhookId ? { githubWebhookId: webhookId } : {}),
 				updatedAt: Date.now()
 			})
 			.where(eq(projects.id, job.projectId));

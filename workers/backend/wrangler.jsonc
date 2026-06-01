@@ -9,6 +9,9 @@
 	"observability": {
 		"enabled": true
 	},
+	"vars": {
+		"APP_URL": "https://builderpro.yayasan-attauhid-1.workers.dev"
+	},
 	"d1_databases": [
 		{
 			"binding": "DB",

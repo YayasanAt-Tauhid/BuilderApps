@@ -202,3 +202,98 @@ export async function enableGithubPages(
 
 	return { error: (enable as { ok: false; message: string }).message };
 }
+
+/**
+ * Register a push webhook on a repo. Returns the webhook ID.
+ * Safe to call even if a webhook with the same URL already exists (returns existing id).
+ */
+export async function registerWebhook(
+	token: string,
+	owner: string,
+	repoName: string,
+	webhookUrl: string,
+	secret: string
+): Promise<{ id: number } | { error: string }> {
+	const repoPath = `/repos/${owner}/${repoName}`;
+
+	const result = await githubRequest<{ id: number }>(token, 'POST', `${repoPath}/hooks`, {
+		name: 'web',
+		active: true,
+		events: ['push'],
+		config: { url: webhookUrl, content_type: 'json', secret, insecure_ssl: '0' }
+	});
+
+	if (result.ok) return { id: result.data.id };
+
+	// 422 = hook with same URL already exists — fetch and return existing id.
+	if ((result as { ok: false; status: number }).status === 422) {
+		const list = await githubRequest<{ id: number; config: { url: string } }[]>(
+			token, 'GET', `${repoPath}/hooks`
+		);
+		if (list.ok) {
+			const existing = list.data.find((h) => h.config.url === webhookUrl);
+			if (existing) return { id: existing.id };
+		}
+	}
+
+	return { error: (result as { ok: false; message: string }).message };
+}
+
+/** Verify GitHub webhook HMAC-SHA256 signature (Workers crypto). */
+export async function verifyWebhookSignature(
+	body: string,
+	signature: string,
+	secret: string
+): Promise<boolean> {
+	if (!signature.startsWith('sha256=')) return false;
+	const sigHex = signature.slice(7);
+	const key = await crypto.subtle.importKey(
+		'raw',
+		new TextEncoder().encode(secret),
+		{ name: 'HMAC', hash: 'SHA-256' },
+		false,
+		['sign']
+	);
+	const expected = await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(body));
+	const expectedHex = Array.from(new Uint8Array(expected))
+		.map((b) => b.toString(16).padStart(2, '0'))
+		.join('');
+	return expectedHex === sigHex;
+}
+
+/** Fetch all files in a repo at a given commit SHA via the Git Tree + Blob API. */
+export async function fetchRepoFilesAtCommit(
+	token: string,
+	owner: string,
+	repoName: string,
+	commitSha: string
+): Promise<FileContent[] | { error: string }> {
+	const repoPath = `/repos/${owner}/${repoName}`;
+
+	const treeResult = await githubRequest<{
+		tree: { path: string; type: string; sha: string }[];
+		truncated: boolean;
+	}>(token, 'GET', `${repoPath}/git/trees/${commitSha}?recursive=1`);
+
+	if (!treeResult.ok) return { error: treeResult.message };
+
+	const blobs = treeResult.data.tree.filter(
+		(e) => e.type === 'blob' && e.path !== '.gitkeep'
+	);
+
+	const files = await Promise.all(
+		blobs.map(async (blob) => {
+			const blobResult = await githubRequest<{ content: string; encoding: string }>(
+				token, 'GET', `${repoPath}/git/blobs/${blob.sha}`
+			);
+			if (!blobResult.ok) return null;
+			const content =
+				blobResult.data.encoding === 'base64'
+					? atob(blobResult.data.content.replace(/\n/g, ''))
+					: blobResult.data.content;
+			return { path: blob.path, content };
+		})
+	);
+
+	return files.filter((f): f is FileContent => f !== null);
+}

@@ -14,7 +14,8 @@
 		"enabled": true
 	},
 	"vars": {
-		"GITHUB_CLIENT_ID": "Ov23li4GcZI2jKTndNbI"
+		"GITHUB_CLIENT_ID": "Ov23li4GcZI2jKTndNbI",
+		"APP_URL": "https://builderpro.yayasan-attauhid-1.workers.dev"
 	},
 	"d1_databases": [
 		{

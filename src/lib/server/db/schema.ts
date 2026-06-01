@@ -55,6 +55,7 @@ export const projects = sqliteTable(
 		githubPagesUrl: text('github_pages_url'),
 		githubSyncedVersion: integer('github_synced_version'),
 		githubLastCommitSha: text('github_last_commit_sha'),
+		githubWebhookId: integer('github_webhook_id'),
 		...timestamps
 	},
 	(t) => [uniqueIndex('projects_user_slug_idx').on(t.userId, t.slug)]

@@ -84,6 +84,8 @@ export const POST: RequestHandler = async (event) => {
 			supabaseCtx = {
 				url: project.supabaseUrl,
 				anonKey: project.supabaseAnonKey,
+				projectRef: project.supabaseProjectRef,
+				accessToken: userRow.supabaseAccessToken,
 				tables: tables.map((t) => ({ name: t.name, columns: t.columns.map((c) => ({ name: c.name, type: c.type })) }))
 			};
 		}

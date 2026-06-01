@@ -29,6 +29,15 @@ export interface Todo { id: string; created_at: string; title: string; completed
 
 3. src/routes/+page.svelte  ← main app UI (most important — make it complete and functional)
 
+4. supabase/migrations/001_init.sql  ← CREATE TABLE IF NOT EXISTS for all tables the app needs
+Example:
+CREATE TABLE IF NOT EXISTS todos (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  created_at timestamptz NOT NULL DEFAULT now(),
+  title text NOT NULL,
+  completed boolean NOT NULL DEFAULT false
+);
+
 Additional files as needed:
   src/lib/components/*.svelte  → reusable UI components
   src/routes/[route]/+page.svelte  → additional pages/routes
@@ -96,6 +105,8 @@ Rules:
 export interface SupabaseContext {
 	url: string;
 	anonKey: string;
+	projectRef: string;
+	accessToken: string;
 	tables: { name: string; columns: { name: string; type: string }[] }[];
 }
 

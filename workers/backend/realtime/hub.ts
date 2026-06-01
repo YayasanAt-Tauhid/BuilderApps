@@ -10,6 +10,7 @@ import { recordUsage } from '../../../src/lib/server/usage';
 import { ulid } from '../../../src/lib/utils/ulid';
 import type { Env } from '../../../src/lib/server/env';
 import { pushFilesToRepo, enableGithubPages, registerWebhook } from '../../../src/lib/server/github';
+import { runMigration } from '../../../src/lib/server/supabase';
 
 interface StartJob {
 	generationId: string;
@@ -313,6 +314,21 @@ export class RealtimeHub {
 				input: estimateTokens(job.prompt) + estimateTokens(systemPrompt),
 				output: estimateTokens(full)
 			});
+
+			// ── 9. Auto-migrate Supabase DB if migration files were generated ──────
+			if (job.supabase?.accessToken && job.supabase?.projectRef) {
+				const migrationFiles = [...finalFiles.entries()]
+					.filter(([p]) => p.startsWith('supabase/migrations/') && p.endsWith('.sql'))
+					.sort(([a], [b]) => a.localeCompare(b));
+				if (migrationFiles.length > 0) {
+					const sql = migrationFiles.map(([, content]) => content).join('\n');
+					const migName = `builderpro_v${job.version}`;
+					const migResult = await runMigration(job.supabase.accessToken, job.supabase.projectRef, sql, migName);
+					if (!migResult.ok) {
+						console.warn(`[hub] migration failed (non-fatal): ${migResult.error}`);
+					}
+				}
+			}
 
 			await db
 				.update(generations)

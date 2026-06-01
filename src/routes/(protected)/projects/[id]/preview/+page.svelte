@@ -44,7 +44,7 @@
 	</p>
 	<iframe
 		title="GitHub Pages preview"
-		src={pagesUrl}
+		src="{pagesUrl}?t={cacheBust}"
 		class="h-[70vh] w-full rounded-lg border bg-white"
 	></iframe>
 {:else}

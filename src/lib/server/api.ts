@@ -30,5 +30,6 @@ export const errors = {
 	rateLimited: () => fail('rate_limited', 'Too many requests. Please slow down.', 429),
 	quotaExceeded: () => fail('quota_exceeded', 'You have reached your AI usage limit.', 429),
 	conflict: (message = 'Conflict.') => fail('conflict', message, 409),
+	badRequest: (message = 'Bad request.') => fail('bad_request', message, 400),
 	internal: () => fail('internal_error', 'Something went wrong. Please try again.', 500)
 };

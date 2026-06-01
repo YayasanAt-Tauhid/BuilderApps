@@ -59,7 +59,8 @@ export const POST: RequestHandler = async (event) => {
 	);
 
 	if ('error' in result) {
-		return errors.internal();
+		console.error(`[github/sync] pushFilesToRepo failed: ${result.error}`);
+		return errors.badRequest(result.error);
 	}
 
 	// Enable GitHub Pages and register webhook (if not already done).

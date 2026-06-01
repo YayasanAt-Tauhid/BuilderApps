@@ -13,8 +13,13 @@
 	let status = $state<'idle' | 'running' | 'error'>('idle');
 	let statusText = $state('');
 	let prompt = $state('');
+	let chatEl = $state<HTMLDivElement | null>(null);
 
 	const projectId = data.project.id;
+
+	function scrollBottom() {
+		setTimeout(() => chatEl?.scrollTo({ top: chatEl.scrollHeight, behavior: 'smooth' }), 50);
+	}
 
 	async function refreshMessages(): Promise<ChatMsg[]> {
 		const res = await fetch(`/api/v1/projects/${projectId}/messages`);
@@ -31,10 +36,10 @@
 		history = await refreshMessages();
 		streaming = '';
 		status = 'idle';
-		statusText = `Done — generated files are in the Files tab (v${version}).`;
+		statusText = `Done — v${version} is ready in the Files tab.`;
+		scrollBottom();
 	}
 
-	// Fallback when the live stream is unavailable: poll the generation status.
 	async function pollGeneration(generationId: string) {
 		for (let i = 0; i < 90; i++) {
 			await sleep(2000);
@@ -52,7 +57,6 @@
 		statusText = 'Generation timed out. Please try again.';
 	}
 
-	// Live token streaming over SSE (parsed from a fetch ReadableStream).
 	async function streamGeneration(generationId: string) {
 		const res = await fetch(`/api/v1/projects/${projectId}/generations/${generationId}/stream`, {
 			headers: { Accept: 'text/event-stream' }
@@ -89,6 +93,7 @@
 
 				if (eventName === 'token') {
 					streaming += String(payload.content ?? '');
+					scrollBottom();
 				} else if (eventName === 'done') {
 					await finishOk(Number(payload.version ?? 1));
 					return;
@@ -101,7 +106,6 @@
 				}
 			}
 		}
-		// Stream ended without an explicit done/failed → reconcile via polling.
 		await pollGeneration(generationId);
 		void needFallback;
 	}
@@ -116,6 +120,7 @@
 		status = 'running';
 		streaming = '';
 		statusText = 'Generating…';
+		scrollBottom();
 
 		const res = await fetch(`/api/v1/projects/${projectId}/messages`, {
 			method: 'POST',
@@ -141,62 +146,139 @@
 
 <svelte:head><title>{data.project.name} — {m.app_name()}</title></svelte:head>
 
-<div class="mb-4 flex items-center justify-between">
-	<h1 class="text-xl font-bold">{data.project.name}</h1>
-	<div class="flex gap-3 text-sm">
-		<a href="/projects/{projectId}/files" class="hover:text-primary">{m.project_files()}</a>
-		<a href="/projects/{projectId}/preview" class="hover:text-primary">{m.project_preview()}</a>
-		<a href="/api/v1/projects/{projectId}/export" class="hover:text-primary">Export .zip</a>
-	</div>
-</div>
-
-<div class="flex flex-col gap-3 rounded-lg border bg-card p-4">
-	<div class="flex max-h-[60vh] flex-col gap-3 overflow-y-auto">
-		{#each history as msg (msg.id)}
-			<div
-				class="rounded-md p-3 text-sm {msg.role === 'user' ? 'bg-muted' : 'border bg-background'}"
+<div class="flex h-[calc(100vh-5rem)] flex-col">
+	<!-- Header -->
+	<div class="mb-4 flex items-center gap-3">
+		<a href="/dashboard" class="text-muted-foreground transition hover:text-foreground">
+			<svg xmlns="http://www.w3.org/2000/svg" class="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+				<path d="M19 12H5M12 5l-7 7 7 7"/>
+			</svg>
+		</a>
+		<h1 class="text-lg font-bold">{data.project.name}</h1>
+		<div class="ml-auto flex items-center gap-1 text-sm">
+			<a
+				href="/projects/{projectId}/files"
+				class="rounded-lg px-3 py-1.5 text-muted-foreground transition hover:bg-muted hover:text-foreground"
 			>
-				<span class="mb-1 block text-xs font-medium text-muted-foreground">{msg.role}</span>
-				{#if msg.role === 'assistant'}
-					<GeneratedFiles text={msg.content} />
-				{:else}
-					<pre class="whitespace-pre-wrap font-sans text-sm">{msg.content}</pre>
-				{/if}
-			</div>
-		{/each}
-
-		{#if streaming}
-			<div class="rounded-md border bg-background p-3 text-sm">
-				<span class="mb-1 block text-xs font-medium text-muted-foreground">assistant</span>
-				<GeneratedFiles text={streaming} live />
-			</div>
-		{/if}
-
-		{#if status === 'running'}
-			<p class="flex items-center gap-2 text-sm text-muted-foreground">
-				<span class="h-3 w-3 animate-spin rounded-full border-2 border-primary border-t-transparent"
-				></span>
-				{statusText}
-			</p>
-		{:else if status === 'error'}
-			<p class="text-sm text-destructive">{statusText}</p>
-		{:else if statusText}
-			<p class="text-sm text-success">{statusText}</p>
-		{/if}
+				{m.project_files()}
+			</a>
+			<a
+				href="/projects/{projectId}/preview"
+				class="rounded-lg px-3 py-1.5 text-muted-foreground transition hover:bg-muted hover:text-foreground"
+			>
+				{m.project_preview()}
+			</a>
+			<a
+				href="/api/v1/projects/{projectId}/export"
+				class="rounded-lg px-3 py-1.5 text-muted-foreground transition hover:bg-muted hover:text-foreground"
+			>
+				Export .zip
+			</a>
+		</div>
 	</div>
 
-	<form onsubmit={send} class="flex gap-2 border-t pt-3">
-		<input
-			bind:value={prompt}
-			placeholder={m.project_describe()}
-			class="flex-1 rounded-md border bg-background px-3 py-2"
-		/>
-		<button
-			type="submit"
-			disabled={status === 'running'}
-			class="rounded-md bg-primary px-4 py-2 font-medium text-primary-foreground hover:opacity-90 disabled:opacity-50"
-		>
-			{m.project_send()}
-		</button>
-	</form>
+	<!-- Chat area -->
+	<div class="flex flex-1 flex-col overflow-hidden rounded-2xl border bg-card shadow-sm">
+		<!-- Messages -->
+		<div bind:this={chatEl} class="flex flex-1 flex-col gap-4 overflow-y-auto p-5">
+			{#if history.length === 0 && !streaming}
+				<div class="flex flex-col items-center justify-center gap-3 py-16 text-center">
+					<div class="text-5xl">✨</div>
+					<p class="font-semibold">What are we building today?</p>
+					<p class="max-w-sm text-sm text-muted-foreground">
+						Describe your app idea below. Be specific — include features, tech stack, or style preferences.
+					</p>
+				</div>
+			{/if}
+
+			{#each history as msg (msg.id)}
+				{#if msg.role === 'user'}
+					<div class="flex justify-end">
+						<div class="max-w-[80%] rounded-2xl rounded-tr-sm bg-primary px-4 py-2.5 text-sm text-primary-foreground shadow-sm">
+							<pre class="whitespace-pre-wrap font-sans">{msg.content}</pre>
+						</div>
+					</div>
+				{:else}
+					<div class="flex justify-start">
+						<div class="flex max-w-[90%] gap-3">
+							<div
+								class="flex size-7 shrink-0 items-center justify-center rounded-full bg-primary/10 text-xs font-bold text-primary"
+							>
+								AI
+							</div>
+							<div class="rounded-2xl rounded-tl-sm border bg-background px-4 py-2.5 text-sm shadow-sm">
+								<GeneratedFiles text={msg.content} />
+							</div>
+						</div>
+					</div>
+				{/if}
+			{/each}
+
+			{#if streaming}
+				<div class="flex justify-start">
+					<div class="flex max-w-[90%] gap-3">
+						<div
+							class="flex size-7 shrink-0 items-center justify-center rounded-full bg-primary/10 text-xs font-bold text-primary"
+						>
+							AI
+						</div>
+						<div class="rounded-2xl rounded-tl-sm border bg-background px-4 py-2.5 text-sm shadow-sm">
+							<GeneratedFiles text={streaming} live />
+						</div>
+					</div>
+				</div>
+			{/if}
+
+			{#if status === 'running'}
+				<div class="flex items-center gap-2 pl-10 text-xs text-muted-foreground">
+					<span class="size-3 animate-spin rounded-full border-2 border-primary border-t-transparent"></span>
+					{statusText}
+				</div>
+			{:else if status === 'error'}
+				<div class="ml-10 rounded-xl border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive">
+					{statusText}
+				</div>
+			{:else if statusText}
+				<div class="flex items-center gap-1.5 pl-10 text-xs text-success">
+					<svg xmlns="http://www.w3.org/2000/svg" class="size-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+						<path d="M20 6L9 17l-5-5"/>
+					</svg>
+					{statusText}
+				</div>
+			{/if}
+		</div>
+
+		<!-- Input -->
+		<form onsubmit={send} class="flex items-end gap-2 border-t bg-card/80 p-4">
+			<textarea
+				bind:value={prompt}
+				placeholder={m.project_describe()}
+				rows="1"
+				disabled={status === 'running'}
+				onkeydown={(e) => {
+					if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); e.currentTarget.form?.requestSubmit(); }
+				}}
+				oninput={(e) => {
+					const el = e.currentTarget;
+					el.style.height = 'auto';
+					el.style.height = Math.min(el.scrollHeight, 140) + 'px';
+				}}
+				class="max-h-36 flex-1 resize-none rounded-xl border bg-background px-4 py-2.5 text-sm shadow-sm transition placeholder:text-muted-foreground focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20 disabled:opacity-50"
+			></textarea>
+			<button
+				type="submit"
+				disabled={status === 'running'}
+				class="flex size-10 shrink-0 items-center justify-center rounded-xl bg-primary text-primary-foreground shadow-sm transition hover:opacity-90 disabled:opacity-40"
+				title="Send (Enter)"
+			>
+				{#if status === 'running'}
+					<span class="size-4 animate-spin rounded-full border-2 border-primary-foreground border-t-transparent"></span>
+				{:else}
+					<svg xmlns="http://www.w3.org/2000/svg" class="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+						<path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z"/>
+					</svg>
+				{/if}
+			</button>
+		</form>
+	</div>
 </div>

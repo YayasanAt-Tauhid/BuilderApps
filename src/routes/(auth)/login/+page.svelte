@@ -12,12 +12,14 @@
 
 <svelte:head><title>{m.auth_login()} — {m.app_name()}</title></svelte:head>
 
-<h1 class="mb-6 text-xl font-semibold">{m.auth_login()}</h1>
+<h1 class="mb-1 text-xl font-bold">{m.auth_login()}</h1>
+<p class="mb-6 text-sm text-muted-foreground">Welcome back — sign in to continue.</p>
 
 {#if form?.error}
-	<p class="mb-4 rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive" role="alert">
+	<div class="mb-4 flex items-center gap-2 rounded-xl border border-destructive/30 bg-destructive/10 px-3 py-2.5 text-sm text-destructive" role="alert">
+		<svg xmlns="http://www.w3.org/2000/svg" class="size-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12" y2="16"/></svg>
 		{form.error}
-	</p>
+	</div>
 {/if}
 
 <form
@@ -39,12 +41,17 @@
 		<Label for="password">{m.auth_password()}</Label>
 		<Input id="password" name="password" type="password" required autocomplete="current-password" />
 	</div>
-	<Button type="submit" disabled={loading}>
-		{loading ? '…' : m.auth_login()}
+	<Button type="submit" disabled={loading} class="mt-1">
+		{#if loading}
+			<span class="size-4 animate-spin rounded-full border-2 border-primary-foreground border-t-transparent"></span>
+			Signing in…
+		{:else}
+			{m.auth_login()}
+		{/if}
 	</Button>
 </form>
 
-<p class="mt-4 text-center text-sm text-muted-foreground">
+<p class="mt-5 text-center text-sm text-muted-foreground">
 	{m.auth_no_account()}
-	<a href="/register" class="text-primary hover:underline">{m.auth_register()}</a>
+	<a href="/register" class="font-medium text-primary hover:underline">{m.auth_register()}</a>
 </p>

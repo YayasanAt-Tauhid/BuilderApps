@@ -213,42 +213,41 @@
 		<svg class="size-5 text-orange-500" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
 			<path d="M16.5 15.6l.5-1.6c.1-.2 0-.4-.1-.5s-.3-.2-.5-.3l-9.1-.1c-.1 0-.2 0-.2-.1 0-.1 0-.2.1-.2l.3-.9c0-.1.1-.2.2-.2l9.6-.1c1.4 0 2.4 1.3 2 2.7l-.6 2.1c-.1.3-.4.4-.6.4h-1.3c-.1 0-.2-.1-.2-.3l.4-1.1zM7.5 18.5l-.3 1.2c-.1.2 0 .4.1.5s.3.2.5.3l9.1.1c.1 0 .2 0 .2.1 0 .1 0 .2-.1.2l-.3.9c0 .1-.1.2-.2.2l-9.6.1C5.5 22 4.5 20.7 4.9 19.3l.6-2.1c.1-.3.4-.4.6-.4h1.7c.1 0 .2.1.2.3l-.5 1.4z"/>
 		</svg>
-		<h2 class="font-semibold">Cloudflare</h2>
+		<h2 class="font-semibold">Cloudflare API Token</h2>
 		{#if data.cloudflareConnected}
-			<span class="ml-auto rounded-full bg-green-500/15 px-2.5 py-0.5 text-xs font-medium text-green-700 dark:text-green-400">Connected</span>
+			<span class="ml-auto rounded-full bg-green-500/15 px-2.5 py-0.5 text-xs font-medium text-green-700 dark:text-green-400">Saved</span>
 		{/if}
 	</div>
 
-	{#if cfJustConnected}
-		<div class="mb-3 rounded-xl border border-green-200 bg-green-50 px-3 py-2 text-xs text-green-700 dark:border-green-900 dark:bg-green-950/40 dark:text-green-400">
-			Cloudflare connected successfully.
-		</div>
-	{/if}
-	{#if cfError}
-		<div class="mb-3 rounded-xl border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive">
-			{cfErrorMessages[cfError] ?? 'Cloudflare connection failed.'}
-		</div>
-	{/if}
+	<p class="mb-3 text-sm text-muted-foreground">
+		Buat API Token di <a href="https://dash.cloudflare.com/profile/api-tokens" target="_blank" class="underline">dash.cloudflare.com/profile/api-tokens</a>
+		dengan template <strong>Edit Cloudflare Workers</strong> atau scope <strong>Cloudflare Pages:Edit</strong>, lalu paste di sini.
+		Token akan diset otomatis sebagai <code class="rounded bg-muted px-1 text-xs">CLOUDFLARE_API_TOKEN</code> setiap kali Push ke GitHub.
+	</p>
 
 	{#if data.cloudflareConnected}
-		<p class="mb-4 text-sm text-muted-foreground">
-			Cloudflare connected. When you push to GitHub, <code class="rounded bg-muted px-1 text-xs">CLOUDFLARE_API_TOKEN</code> dibuat dan diset otomatis.
-		</p>
-		<form method="POST" action="?/disconnectCloudflare" use:enhance>
-			<button type="submit" class="rounded-xl border px-4 py-2 text-sm transition hover:bg-muted">
-				Disconnect
+		<p class="mb-3 text-xs text-muted-foreground">Token tersimpan. Paste token baru di bawah untuk mengganti.</p>
+	{/if}
+
+	<form method="POST" action="?/saveCloudflareToken" use:enhance class="flex gap-2">
+		<input
+			type="password"
+			name="token"
+			placeholder="cfp_xxxxxxxxxxxxxxxx"
+			autocomplete="off"
+			class="min-w-0 flex-1 rounded-xl border bg-background px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-orange-500"
+		/>
+		<button type="submit" class="rounded-xl bg-orange-500 px-4 py-2 text-sm font-medium text-white transition hover:bg-orange-600">
+			Save
+		</button>
+	</form>
+
+	{#if data.cloudflareConnected}
+		<form method="POST" action="?/disconnectCloudflare" use:enhance class="mt-3">
+			<button type="submit" class="text-xs text-muted-foreground underline hover:text-foreground">
+				Remove token
 			</button>
 		</form>
-	{:else}
-		<p class="mb-4 text-sm text-muted-foreground">
-			Connect Cloudflare agar BuilderPro bisa auto-deploy ke Cloudflare Pages — tanpa perlu copy-paste API token apapun.
-		</p>
-		<a
-			href="/api/v1/auth/cloudflare"
-			class="inline-flex items-center gap-2 rounded-xl bg-orange-500 px-4 py-2 text-sm font-medium text-white transition hover:bg-orange-600"
-		>
-			Connect Cloudflare
-		</a>
 	{/if}
 </section>
 

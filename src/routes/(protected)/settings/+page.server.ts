@@ -84,5 +84,18 @@ export const actions: Actions = {
 			.set({ cloudflareAccessToken: null, cloudflareRefreshToken: null, updatedAt: Date.now() })
 			.where(eq(users.id, user.id));
 		return { success: true };
+	},
+
+	saveCloudflareToken: async (event) => {
+		const user = requireUser(event);
+		const form = await event.request.formData();
+		const token = (form.get('token') as string | null)?.trim() ?? '';
+		if (!token) return fail(400, { error: 'Token is required.' });
+		const db = getDb(event);
+		await db
+			.update(users)
+			.set({ cloudflareAccessToken: token, updatedAt: Date.now() })
+			.where(eq(users.id, user.id));
+		return { success: true };
 	}
 };

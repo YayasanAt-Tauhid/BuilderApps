@@ -113,6 +113,11 @@ jobs:
       - uses: actions/setup-node@v4
         with: { node-version: 20, cache: pnpm }
       - run: pnpm install
+      - name: Apply Supabase migrations
+        run: npx supabase db push
+        env:
+          SUPABASE_ACCESS_TOKEN: \${{ secrets.SUPABASE_ACCESS_TOKEN }}
+        continue-on-error: true
       - run: pnpm build
         env:
           VITE_SUPABASE_URL: \${{ secrets.VITE_SUPABASE_URL }}

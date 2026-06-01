@@ -123,6 +123,9 @@ src/lib/supabase.ts MUST be:
 import { createClient } from '@supabase/supabase-js';
 export const supabase = createClient('${ctx.url}', '${ctx.anonKey}');
 
+supabase/config.toml MUST be:
+project_id = "${ctx.projectRef}"
+
 Existing database tables (public schema):
 ${tableList || '(no tables yet — design schema appropriate for this app)'}`;
 }

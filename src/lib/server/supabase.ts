@@ -69,10 +69,36 @@ export interface SupabaseProject {
 	status: string;
 }
 
-/** List all Supabase projects for the authenticated user. */
+/** List all Supabase projects for the authenticated user. Returns null on auth failure. */
 export async function listProjects(token: string): Promise<SupabaseProject[] | null> {
 	const result = await supabaseRequest<SupabaseProject[]>(token, 'GET', '/projects');
-	return result.ok ? result.data : null;
+	if (!result.ok) {
+		console.error(`[supabase] listProjects failed: ${result.status} ${result.message}`);
+		return null;
+	}
+	return result.data;
+}
+
+/** Refresh the access token using the refresh token. */
+export async function refreshAccessToken(
+	refreshToken: string,
+	clientId: string,
+	clientSecret: string
+): Promise<{ accessToken: string; refreshToken: string } | null> {
+	const res = await fetch(`${SUPABASE_API}/oauth/token`, {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'User-Agent': USER_AGENT },
+		body: new URLSearchParams({
+			grant_type: 'refresh_token',
+			refresh_token: refreshToken,
+			client_id: clientId,
+			client_secret: clientSecret
+		}).toString()
+	});
+	if (!res.ok) return null;
+	const data = (await res.json()) as { access_token?: string; refresh_token?: string };
+	if (!data.access_token) return null;
+	return { accessToken: data.access_token, refreshToken: data.refresh_token ?? refreshToken };
 }
 
 interface ApiKey {

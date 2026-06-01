@@ -257,6 +257,11 @@
 			>
 				Unlink
 			</button>
+		{:else if data.supabaseTokenError}
+			<span class="text-xs text-destructive">
+				Session expired —
+				<a href="/api/v1/auth/supabase" class="underline">reconnect Supabase</a>
+			</span>
 		{:else if data.supabaseProjects.length > 0}
 			<span class="text-muted-foreground">Link Supabase project:</span>
 			<select
@@ -273,7 +278,10 @@
 				{/each}
 			</select>
 		{:else}
-			<span class="text-muted-foreground">No Supabase projects found. Create one at supabase.com.</span>
+			<span class="text-xs text-muted-foreground">
+				No Supabase projects found.
+				<a href="https://supabase.com/dashboard/new" target="_blank" rel="noopener" class="underline">Create one</a> first.
+			</span>
 		{/if}
 		{#if supabaseLinkError}
 			<span class="text-destructive">{supabaseLinkError}</span>

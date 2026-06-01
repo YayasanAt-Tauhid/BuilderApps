@@ -1,7 +1,7 @@
-import { and, asc, eq, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, sql } from 'drizzle-orm';
 import type { PageServerLoad } from './$types';
 import { requireOwnedProject } from '$lib/server/context';
-import { generatedFiles, users } from '$lib/server/db/schema';
+import { generatedFiles, generations, users } from '$lib/server/db/schema';
 
 export const load: PageServerLoad = async (event) => {
 	const { db, user, project } = await requireOwnedProject(event, event.params.id);
@@ -11,8 +11,13 @@ export const load: PageServerLoad = async (event) => {
 		.from(generatedFiles)
 		.where(eq(generatedFiles.projectId, project.id));
 
-	const version = Number(latest);
-	const [files, githubRow] = await Promise.all([
+	const latestVersion = Number(latest);
+
+	// Parse ?v= query param; fall back to latest.
+	const requestedV = Number(event.url.searchParams.get('v') ?? latestVersion);
+	const version = Number.isInteger(requestedV) && requestedV >= 1 ? requestedV : latestVersion;
+
+	const [files, githubRow, history] = await Promise.all([
 		version === 0
 			? Promise.resolve([])
 			: db
@@ -24,13 +29,33 @@ export const load: PageServerLoad = async (event) => {
 					.from(generatedFiles)
 					.where(and(eq(generatedFiles.projectId, project.id), eq(generatedFiles.version, version)))
 					.orderBy(asc(generatedFiles.path)),
-		db.select({ githubLogin: users.githubLogin }).from(users).where(eq(users.id, user.id)).limit(1)
+		db.select({ githubLogin: users.githubLogin }).from(users).where(eq(users.id, user.id)).limit(1),
+		// All succeeded versions with file count, newest first.
+		db
+			.select({
+				version: generations.version,
+				finishedAt: generations.finishedAt,
+				fileCount: sql<number>`count(${generatedFiles.id})`
+			})
+			.from(generations)
+			.leftJoin(
+				generatedFiles,
+				and(
+					eq(generatedFiles.generationId, generations.id),
+					eq(generatedFiles.projectId, project.id)
+				)
+			)
+			.where(and(eq(generations.projectId, project.id), eq(generations.status, 'succeeded')))
+			.groupBy(generations.id)
+			.orderBy(desc(generations.version))
 	]);
 
 	return {
 		project,
 		version,
+		latestVersion,
 		files,
+		history,
 		githubLogin: githubRow[0]?.githubLogin ?? null
 	};
 };

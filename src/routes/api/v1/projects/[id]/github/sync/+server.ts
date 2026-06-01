@@ -5,6 +5,7 @@ import { requireOwnedProject, getEnv } from '$lib/server/context';
 import { generatedFiles, projects, users } from '$lib/server/db/schema';
 import { getFileText } from '$lib/server/storage/r2';
 import { pushFilesToRepo, enableGithubPages, registerWebhook, setRepoSecrets } from '$lib/server/github';
+import { createPagesDeployToken } from '$lib/server/cloudflare-oauth';
 
 // Push the latest generated files to a GitHub repo named after the project slug.
 export const POST: RequestHandler = async (event) => {
@@ -15,13 +16,14 @@ export const POST: RequestHandler = async (event) => {
 		.select({
 			githubAccessToken: users.githubAccessToken,
 			githubLogin: users.githubLogin,
-			supabaseAccessToken: users.supabaseAccessToken
+			supabaseAccessToken: users.supabaseAccessToken,
+			cloudflareAccessToken: users.cloudflareAccessToken
 		})
 		.from(users)
 		.where(eq(users.id, user.id))
 		.limit(1);
 
-	const { githubAccessToken, githubLogin, supabaseAccessToken } = rows[0] ?? {};
+	const { githubAccessToken, githubLogin, supabaseAccessToken, cloudflareAccessToken } = rows[0] ?? {};
 	if (!githubAccessToken || !githubLogin) {
 		return errors.forbidden();
 	}
@@ -95,8 +97,19 @@ export const POST: RequestHandler = async (event) => {
 	if (project.supabaseUrl) secrets['VITE_SUPABASE_URL'] = project.supabaseUrl;
 	if (project.supabaseAnonKey) secrets['VITE_SUPABASE_ANON_KEY'] = project.supabaseAnonKey;
 	if (supabaseAccessToken) secrets['SUPABASE_ACCESS_TOKEN'] = supabaseAccessToken;
-	if (Object.keys(secrets).length > 0) {
-		setRepoSecrets(githubAccessToken, githubLogin, project.slug, secrets).catch(() => {});
+
+	// Create a scoped Cloudflare Pages API token and set it as a secret.
+	if (cloudflareAccessToken) {
+		createPagesDeployToken(cloudflareAccessToken, project.slug)
+			.then((cfToken) => {
+				if (cfToken) secrets['CLOUDFLARE_API_TOKEN'] = cfToken;
+				if (Object.keys(secrets).length > 0) {
+					setRepoSecrets(githubAccessToken!, githubLogin!, project.slug, secrets).catch(() => {});
+				}
+			})
+			.catch(() => {});
+	} else if (Object.keys(secrets).length > 0) {
+		setRepoSecrets(githubAccessToken!, githubLogin!, project.slug, secrets).catch(() => {});
 	}
 
 	return ok({ repoUrl: result.repoUrl, pagesUrl, syncedVersion: version, commitSha: result.commitSha });

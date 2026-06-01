@@ -13,7 +13,11 @@ export const load: PageServerLoad = async (event) => {
 	const [usage, accountRow] = await Promise.all([
 		getUsage(db, user.id),
 		db
-			.select({ githubLogin: users.githubLogin, supabaseAccessToken: users.supabaseAccessToken })
+			.select({
+				githubLogin: users.githubLogin,
+				supabaseAccessToken: users.supabaseAccessToken,
+				cloudflareAccessToken: users.cloudflareAccessToken
+			})
 			.from(users)
 			.where(eq(users.id, user.id))
 			.limit(1)
@@ -23,7 +27,8 @@ export const load: PageServerLoad = async (event) => {
 		usage,
 		preferences: { locale: user.locale, theme: user.theme },
 		githubLogin: accountRow[0]?.githubLogin ?? null,
-		supabaseConnected: !!accountRow[0]?.supabaseAccessToken
+		supabaseConnected: !!accountRow[0]?.supabaseAccessToken,
+		cloudflareConnected: !!accountRow[0]?.cloudflareAccessToken
 	};
 };
 
@@ -67,6 +72,16 @@ export const actions: Actions = {
 		await db
 			.update(users)
 			.set({ supabaseAccessToken: null, supabaseRefreshToken: null, updatedAt: Date.now() })
+			.where(eq(users.id, user.id));
+		return { success: true };
+	},
+
+	disconnectCloudflare: async (event) => {
+		const user = requireUser(event);
+		const db = getDb(event);
+		await db
+			.update(users)
+			.set({ cloudflareAccessToken: null, cloudflareRefreshToken: null, updatedAt: Date.now() })
 			.where(eq(users.id, user.id));
 		return { success: true };
 	}

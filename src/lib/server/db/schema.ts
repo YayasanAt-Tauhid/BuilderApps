@@ -28,6 +28,8 @@ export const users = sqliteTable('users', {
 	githubLogin: text('github_login'),
 	supabaseAccessToken: text('supabase_access_token'),
 	supabaseRefreshToken: text('supabase_refresh_token'),
+	cloudflareAccessToken: text('cloudflare_access_token'),
+	cloudflareRefreshToken: text('cloudflare_refresh_token'),
 	...timestamps
 });
 

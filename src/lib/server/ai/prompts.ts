@@ -48,10 +48,40 @@ Format rules:
 - Multiple @@ hunks per PATCH block are fine.
 - No markdown code fences.`;
 
+export interface SupabaseContext {
+	url: string;
+	anonKey: string;
+	tables: { name: string; columns: { name: string; type: string }[] }[];
+}
+
+/** Builds the Supabase context block appended to system prompts when a project is linked. */
+export function buildSupabaseBlock(ctx: SupabaseContext): string {
+	const tableList = ctx.tables
+		.map((t) => `- ${t.name}: ${t.columns.map((c) => `${c.name} (${c.type})`).join(', ')}`)
+		.join('\n');
+	return `
+This project uses Supabase for database/backend.
+Load via CDN: <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+Initialise: const { createClient } = supabase; const db = createClient('${ctx.url}', '${ctx.anonKey}')
+
+Database tables (public schema):
+${tableList || '(no tables yet)'}
+
+Use db.from('table').select/insert/update/delete() for all data operations.
+Always handle errors: const { data, error } = await db.from(...).select()`;
+}
+
 /** Builds the full system message for an edit turn, injecting current file contents. */
-export function buildEditPrompt(files: Map<string, string>): string {
+export function buildEditPrompt(files: Map<string, string>, supabase?: SupabaseContext): string {
 	const blocks = [...files.entries()]
 		.map(([path, content]) => `=== FILE: ${path} ===\n${content}\n=== END FILE ===`)
 		.join('\n\n');
-	return `${PROMPT_EDIT}\n\nCurrent project files:\n\n${blocks}`;
+	const supabaseBlock = supabase ? `\n\n${buildSupabaseBlock(supabase)}` : '';
+	return `${PROMPT_EDIT}${supabaseBlock}\n\nCurrent project files:\n\n${blocks}`;
+}
+
+/** Builds the system message for first generation with optional Supabase context. */
+export function buildNewPrompt(supabase?: SupabaseContext): string {
+	const supabaseBlock = supabase ? `\n\n${buildSupabaseBlock(supabase)}` : '';
+	return `${PROMPT_NEW}${supabaseBlock}`;
 }

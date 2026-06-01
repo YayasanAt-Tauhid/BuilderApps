@@ -3,7 +3,7 @@ import { createDb } from '../../../src/lib/server/db';
 import { generations, generatedFiles, messages, projects, users } from '../../../src/lib/server/db/schema';
 import { streamChat, estimateTokens, DEFAULT_MODEL } from '../../../src/lib/server/ai';
 import { parseOutput, applyPatch } from '../../../src/lib/server/ai/parser';
-import { buildEditPrompt, PROMPT_NEW } from '../../../src/lib/server/ai/prompts';
+import { buildEditPrompt, buildNewPrompt, type SupabaseContext } from '../../../src/lib/server/ai/prompts';
 import { fileKey, putFile, getFileText, contentHash } from '../../../src/lib/server/storage/r2';
 import { recordUsage } from '../../../src/lib/server/usage';
 import { ulid } from '../../../src/lib/utils/ulid';
@@ -19,6 +19,7 @@ interface StartJob {
 	prevVersion: number | null;
 	prompt: string;
 	model?: string;
+	supabase?: SupabaseContext;
 }
 
 const enc = new TextEncoder();
@@ -193,7 +194,9 @@ export class RealtimeHub {
 			}
 
 			// ── 3. Choose system prompt ───────────────────────────────────────────
-			const systemPrompt = isEdit ? buildEditPrompt(existingFiles) : PROMPT_NEW;
+			const systemPrompt = isEdit
+				? buildEditPrompt(existingFiles, job.supabase)
+				: buildNewPrompt(job.supabase);
 
 			// ── 4. Stream generation ──────────────────────────────────────────────
 			let full = '';
@@ -249,7 +252,7 @@ export class RealtimeHub {
 					apiKey: this.env.OPENROUTER_API_KEY,
 					model: job.model ?? DEFAULT_MODEL,
 					messages: [
-						{ role: 'system', content: PROMPT_NEW },
+						{ role: 'system', content: buildNewPrompt(job.supabase) },
 						{ role: 'user', content: retryPrompt }
 					]
 				})) {

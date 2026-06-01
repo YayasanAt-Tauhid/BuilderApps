@@ -36,12 +36,14 @@ export interface ParsedPatch {
 export interface ParseResult {
 	files: ParsedFile[];
 	patches: ParsedPatch[];
+	deletedPaths: string[];
 }
 
 const FILE_START = /^===\s*FILE:\s*(.+?)\s*===$/;
 const FILE_END = /^===\s*END FILE\s*===$/;
 const PATCH_START = /^===\s*PATCH:\s*(.+?)\s*===$/;
 const PATCH_END = /^===\s*END PATCH\s*===$/;
+const DELETE_MARKER = /^===\s*DELETE:\s*(.+?)\s*===$/;
 const HUNK_HEAD = /^@@/;
 
 type Mode = 'none' | 'file' | 'patch';
@@ -50,6 +52,7 @@ export function parseOutput(output: string): ParseResult {
 	const lines = output.split('\n');
 	const files: ParsedFile[] = [];
 	const patches: ParsedPatch[] = [];
+	const deletedPaths: string[] = [];
 
 	let mode: Mode = 'none';
 	let currentPath: string | null = null;
@@ -80,6 +83,13 @@ export function parseOutput(output: string): ParseResult {
 	};
 
 	for (const line of lines) {
+		const del = line.match(DELETE_MARKER);
+		if (del) {
+			const p = sanitizePath(del[1]);
+			if (p) deletedPaths.push(p);
+			continue;
+		}
+
 		const fs = line.match(FILE_START);
 		if (fs) {
 			if (mode === 'file') flushFile();
@@ -141,7 +151,8 @@ export function parseOutput(output: string): ParseResult {
 	const byPath = new Map(files.filter((f) => f.path).map((f) => [f.path, f.content]));
 	return {
 		files: [...byPath.entries()].map(([path, content]) => ({ path, content })),
-		patches
+		patches,
+		deletedPaths
 	};
 }
 
@@ -187,9 +198,9 @@ function findBlock(lines: string[], search: string[]): number {
 	return -1;
 }
 
-/** Legacy — kept for backward compatibility. Prefer parseOutput(). */
-export function parseGeneratedFiles(output: string): ParsedFile[] {
-	return parseOutput(output).files;
+/** Legacy wrapper around parseOutput(). */
+export function parseGeneratedFiles(output: string): ParseResult {
+	return parseOutput(output);
 }
 
 /** Reject path traversal and absolute paths; normalize separators. */

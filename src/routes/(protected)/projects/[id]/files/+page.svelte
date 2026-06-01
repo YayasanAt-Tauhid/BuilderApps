@@ -17,6 +17,51 @@
 	let restoring = $state<number | null>(null);
 	let restoreError = $state<string | null>(null);
 
+	let supabaseLinking = $state(false);
+	let supabaseLinkError = $state<string | null>(null);
+	let supabaseRef = $state(data.project.supabaseProjectRef ?? null);
+	let supabaseUrl = $state(data.project.supabaseUrl ?? null);
+
+	async function linkSupabase(ref: string) {
+		supabaseLinking = true;
+		supabaseLinkError = null;
+		try {
+			const res = await fetch(`/api/v1/projects/${data.project.id}/supabase`, {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ ref })
+			});
+			if (res.ok) {
+				const json = (await res.json()) as { data: { ref: string; supabaseUrl: string } };
+				supabaseRef = json.data.ref;
+				supabaseUrl = json.data.supabaseUrl;
+			} else {
+				const json = (await res.json()) as { error?: { message?: string } };
+				supabaseLinkError = json.error?.message ?? 'Failed to link Supabase project.';
+			}
+		} catch {
+			supabaseLinkError = 'Network error.';
+		} finally {
+			supabaseLinking = false;
+		}
+	}
+
+	async function unlinkSupabase() {
+		supabaseLinking = true;
+		supabaseLinkError = null;
+		try {
+			const res = await fetch(`/api/v1/projects/${data.project.id}/supabase`, { method: 'DELETE' });
+			if (res.ok) {
+				supabaseRef = null;
+				supabaseUrl = null;
+			}
+		} catch {
+			supabaseLinkError = 'Network error.';
+		} finally {
+			supabaseLinking = false;
+		}
+	}
+
 	const repoUrl = $derived(
 		data.githubLogin ? `https://github.com/${data.githubLogin}/${data.project.slug}` : null
 	);
@@ -194,6 +239,45 @@
 {#if restoreError}
 	<div class="mb-4 rounded-md border border-destructive/40 bg-destructive/10 px-4 py-3 text-sm text-destructive">
 		{restoreError}
+	</div>
+{/if}
+
+{#if data.supabaseConnected}
+	<div class="mb-4 flex items-center gap-3 rounded-lg border bg-card px-4 py-3 text-sm">
+		<svg class="size-4 shrink-0 text-emerald-500" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+			<path d="M21.362 9.354H12V.396a.396.396 0 0 0-.716-.233L2.203 12.424l-.401.562a1.04 1.04 0 0 0 .836 1.659H12v8.959a.396.396 0 0 0 .716.233l9.081-12.261.401-.562a1.04 1.04 0 0 0-.836-1.66z"/>
+		</svg>
+		{#if supabaseRef}
+			<span class="text-muted-foreground">Supabase:</span>
+			<span class="font-medium">{supabaseUrl}</span>
+			<button
+				onclick={unlinkSupabase}
+				disabled={supabaseLinking}
+				class="ml-auto rounded-md border px-2.5 py-1 text-xs text-muted-foreground hover:bg-muted disabled:opacity-50"
+			>
+				Unlink
+			</button>
+		{:else if data.supabaseProjects.length > 0}
+			<span class="text-muted-foreground">Link Supabase project:</span>
+			<select
+				class="rounded-md border bg-background px-2 py-1 text-xs"
+				onchange={(e) => {
+					const val = (e.target as HTMLSelectElement).value;
+					if (val) linkSupabase(val);
+				}}
+				disabled={supabaseLinking}
+			>
+				<option value="">Select project…</option>
+				{#each data.supabaseProjects as p}
+					<option value={p.id}>{p.name}</option>
+				{/each}
+			</select>
+		{:else}
+			<span class="text-muted-foreground">No Supabase projects found. Create one at supabase.com.</span>
+		{/if}
+		{#if supabaseLinkError}
+			<span class="text-destructive">{supabaseLinkError}</span>
+		{/if}
 	</div>
 {/if}
 

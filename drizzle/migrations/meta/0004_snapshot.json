@@ -1,8 +1,8 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "4f1e27cf-7275-48a5-9159-4a9ca68455c4",
-  "prevId": "1b7b7f90-5541-4a9f-85fa-2f986d7fca47",
+  "id": "2e1cbcd8-3bac-46fc-9682-06f4221ff87d",
+  "prevId": "4f1e27cf-7275-48a5-9159-4a9ca68455c4",
   "tables": {
     "generated_files": {
       "name": "generated_files",
@@ -420,6 +420,27 @@
           "notNull": false,
           "autoincrement": false
         },
+        "supabase_project_ref": {
+          "name": "supabase_project_ref",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "supabase_url": {
+          "name": "supabase_url",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "supabase_anon_key": {
+          "name": "supabase_anon_key",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
         "created_at": {
           "name": "created_at",
           "type": "integer",
@@ -700,6 +721,20 @@
         },
         "github_login": {
           "name": "github_login",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "supabase_access_token": {
+          "name": "supabase_access_token",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "supabase_refresh_token": {
+          "name": "supabase_refresh_token",
           "type": "text",
           "primaryKey": false,
           "notNull": false,

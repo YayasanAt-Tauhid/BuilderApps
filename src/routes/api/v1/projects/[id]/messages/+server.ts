@@ -3,10 +3,12 @@ import type { RequestHandler } from './$types';
 import { ok, errors } from '$lib/server/api';
 import { requireOwnedProject, getEnv } from '$lib/server/context';
 import { createMessageSchema, parse } from '$lib/schemas';
-import { messages, generations, projects } from '$lib/server/db/schema';
+import { messages, generations, projects, users } from '$lib/server/db/schema';
 import { hasQuota } from '$lib/server/usage';
 import { ulid } from '$lib/utils/ulid';
 import { DEFAULT_MODEL } from '$lib/server/ai';
+import { getTableSchemas } from '$lib/server/supabase';
+import type { SupabaseContext } from '$lib/server/ai/prompts';
 
 export const GET: RequestHandler = async (event) => {
 	const { db, project } = await requireOwnedProject(event, event.params.id);
@@ -69,6 +71,24 @@ export const POST: RequestHandler = async (event) => {
 	await db.insert(generations).values(generation);
 	await db.update(projects).set({ status: 'generating', updatedAt: now }).where(eq(projects.id, project.id));
 
+	// Fetch Supabase context if this project is linked to a Supabase project.
+	let supabaseCtx: SupabaseContext | undefined;
+	if (project.supabaseUrl && project.supabaseAnonKey && project.supabaseProjectRef) {
+		const [userRow] = await db
+			.select({ supabaseAccessToken: users.supabaseAccessToken })
+			.from(users)
+			.where(eq(users.id, user.id))
+			.limit(1);
+		if (userRow?.supabaseAccessToken) {
+			const tables = await getTableSchemas(userRow.supabaseAccessToken, project.supabaseProjectRef);
+			supabaseCtx = {
+				url: project.supabaseUrl,
+				anonKey: project.supabaseAnonKey,
+				tables: tables.map((t) => ({ name: t.name, columns: t.columns.map((c) => ({ name: c.name, type: c.type })) }))
+			};
+		}
+	}
+
 	// Kick the per-project Durable Object to run + stream the generation (PRD §11.4).
 	const stub = env.DO_REALTIME.get(env.DO_REALTIME.idFromName(project.id));
 	event.platform?.ctx.waitUntil(
@@ -82,7 +102,8 @@ export const POST: RequestHandler = async (event) => {
 				version: generation.version,
 				prevVersion: Number(maxVersion) > 0 ? Number(maxVersion) : null,
 				prompt: result.data.content,
-				model: DEFAULT_MODEL
+				model: DEFAULT_MODEL,
+				...(supabaseCtx ? { supabase: supabaseCtx } : {})
 			})
 		})
 	);

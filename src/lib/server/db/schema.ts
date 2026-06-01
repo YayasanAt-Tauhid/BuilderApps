@@ -26,6 +26,8 @@ export const users = sqliteTable('users', {
 		.default('system'),
 	githubAccessToken: text('github_access_token'),
 	githubLogin: text('github_login'),
+	supabaseAccessToken: text('supabase_access_token'),
+	supabaseRefreshToken: text('supabase_refresh_token'),
 	...timestamps
 });
 
@@ -56,6 +58,9 @@ export const projects = sqliteTable(
 		githubSyncedVersion: integer('github_synced_version'),
 		githubLastCommitSha: text('github_last_commit_sha'),
 		githubWebhookId: integer('github_webhook_id'),
+		supabaseProjectRef: text('supabase_project_ref'),
+		supabaseUrl: text('supabase_url'),
+		supabaseAnonKey: text('supabase_anon_key'),
 		...timestamps
 	},
 	(t) => [uniqueIndex('projects_user_slug_idx').on(t.userId, t.slug)]

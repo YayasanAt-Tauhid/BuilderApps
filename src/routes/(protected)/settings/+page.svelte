@@ -13,6 +13,16 @@
 
 	const githubError = $derived($page.url.searchParams.get('github_error'));
 	const githubConnected = $derived($page.url.searchParams.get('github_connected') === '1');
+	const supabaseError = $derived($page.url.searchParams.get('supabase_error'));
+	const supabaseJustConnected = $derived($page.url.searchParams.get('supabase_connected') === '1');
+
+	const supabaseErrorMessages: Record<string, string> = {
+		denied: 'Supabase access was denied.',
+		invalid: 'Invalid OAuth response.',
+		expired: 'OAuth session expired. Please try again.',
+		config: 'Supabase integration is not configured.',
+		token: 'Failed to obtain access token.'
+	};
 
 	const githubErrorMessages: Record<string, string> = {
 		denied: 'GitHub access was denied.',
@@ -113,6 +123,47 @@
 				/>
 			</svg>
 			Connect GitHub
+		</a>
+	{/if}
+</section>
+
+<section class="mb-8 max-w-md rounded-lg border bg-card p-5">
+	<h2 class="mb-4 font-semibold">Supabase Integration</h2>
+
+	{#if supabaseJustConnected}
+		<p class="mb-3 text-sm text-success">Supabase connected successfully.</p>
+	{/if}
+
+	{#if supabaseError}
+		<p class="mb-3 text-sm text-destructive">
+			{supabaseErrorMessages[supabaseError] ?? 'Supabase connection failed.'}
+		</p>
+	{/if}
+
+	{#if data.supabaseConnected}
+		<div class="mb-3 flex items-center gap-2">
+			<svg class="size-5 text-muted-foreground" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+				<path d="M21.362 9.354H12V.396a.396.396 0 0 0-.716-.233L2.203 12.424l-.401.562a1.04 1.04 0 0 0 .836 1.659H12v8.959a.396.396 0 0 0 .716.233l9.081-12.261.401-.562a1.04 1.04 0 0 0-.836-1.66z"/>
+			</svg>
+			<span class="text-sm">Supabase account <strong>connected</strong></span>
+		</div>
+		<form method="POST" action="?/disconnectSupabase" use:enhance>
+			<button type="submit" class="rounded-md border px-4 py-2 text-sm hover:bg-muted">
+				Disconnect Supabase
+			</button>
+		</form>
+	{:else}
+		<p class="mb-3 text-sm text-muted-foreground">
+			Connect your Supabase account to generate apps with real database CRUD operations.
+		</p>
+		<a
+			href="/api/v1/auth/supabase"
+			class="inline-flex items-center gap-2 rounded-md bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700"
+		>
+			<svg class="size-4" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+				<path d="M21.362 9.354H12V.396a.396.396 0 0 0-.716-.233L2.203 12.424l-.401.562a1.04 1.04 0 0 0 .836 1.659H12v8.959a.396.396 0 0 0 .716.233l9.081-12.261.401-.562a1.04 1.04 0 0 0-.836-1.66z"/>
+			</svg>
+			Connect Supabase
 		</a>
 	{/if}
 </section>

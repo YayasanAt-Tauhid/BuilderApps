@@ -15,6 +15,7 @@
 	},
 	"vars": {
 		"GITHUB_CLIENT_ID": "Ov23li4GcZI2jKTndNbI",
+		"SUPABASE_CLIENT_ID": "091e3d07-dac8-4e5b-b913-24f189cf7f99",
 		"APP_URL": "https://builderpro.yayasan-attauhid-1.workers.dev"
 	},
 	"d1_databases": [

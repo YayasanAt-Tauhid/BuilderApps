@@ -21,6 +21,9 @@ export interface Env {
 	/** GitHub OAuth App credentials (app worker — needed for the OAuth callback flow). */
 	GITHUB_CLIENT_ID?: string;
 	GITHUB_CLIENT_SECRET?: string;
+	/** Supabase OAuth App credentials (app worker). */
+	SUPABASE_CLIENT_ID?: string;
+	SUPABASE_CLIENT_SECRET?: string;
 	/** Shared between app + backend workers for webhook signature verification. */
 	GITHUB_WEBHOOK_SECRET?: string;
 	/** Public base URL of the app worker, used to register webhook URLs. */

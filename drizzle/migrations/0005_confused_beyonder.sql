@@ -1,0 +1,1 @@
+ALTER TABLE `projects` ADD `cf_pages_url` text;

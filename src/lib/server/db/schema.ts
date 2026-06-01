@@ -61,6 +61,7 @@ export const projects = sqliteTable(
 		supabaseProjectRef: text('supabase_project_ref'),
 		supabaseUrl: text('supabase_url'),
 		supabaseAnonKey: text('supabase_anon_key'),
+		cfPagesUrl: text('cf_pages_url'),
 		...timestamps
 	},
 	(t) => [uniqueIndex('projects_user_slug_idx').on(t.userId, t.slug)]

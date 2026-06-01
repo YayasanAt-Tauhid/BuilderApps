@@ -28,4 +28,7 @@ export interface Env {
 	GITHUB_WEBHOOK_SECRET?: string;
 	/** Public base URL of the app worker, used to register webhook URLs. */
 	APP_URL?: string;
+	/** Cloudflare Pages deployment (app worker — for one-click deploy feature). */
+	CLOUDFLARE_PAGES_API_TOKEN?: string;
+	CLOUDFLARE_ACCOUNT_ID?: string;
 }

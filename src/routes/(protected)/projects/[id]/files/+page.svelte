@@ -22,6 +22,10 @@
 	let supabaseRef = $state(data.project.supabaseProjectRef ?? null);
 	let supabaseUrl = $state(data.project.supabaseUrl ?? null);
 
+	let deploying = $state(false);
+	let deployError = $state<string | null>(null);
+	let cfPagesUrl = $state(data.project.cfPagesUrl ?? null);
+
 	async function linkSupabase(ref: string) {
 		supabaseLinking = true;
 		supabaseLinkError = null;
@@ -77,6 +81,25 @@
 			hour: '2-digit',
 			minute: '2-digit'
 		});
+	}
+
+	async function deployToCloudflare() {
+		deploying = true;
+		deployError = null;
+		try {
+			const res = await fetch(`/api/v1/projects/${data.project.id}/deploy`, { method: 'POST' });
+			if (res.ok) {
+				const json = (await res.json()) as { data: { url: string } };
+				cfPagesUrl = json.data.url;
+			} else {
+				const json = (await res.json()) as { error?: { message?: string } };
+				deployError = json.error?.message ?? 'Deploy failed.';
+			}
+		} catch {
+			deployError = 'Network error.';
+		} finally {
+			deploying = false;
+		}
 	}
 
 	async function open(file: { id: string; path: string }) {
@@ -228,9 +251,38 @@
 				Push to GitHub
 			</a>
 		{/if}
+
+		{#if data.cfPagesEnabled && data.files.length > 0 && isViewingLatest}
+			{#if cfPagesUrl}
+				<a
+					href={cfPagesUrl}
+					target="_blank"
+					rel="noopener noreferrer"
+					class="flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-sm hover:bg-muted"
+				>
+					<span class="size-2 rounded-full bg-orange-500"></span>
+					Live
+				</a>
+			{/if}
+			<button
+				onclick={deployToCloudflare}
+				disabled={deploying}
+				class="inline-flex items-center gap-1.5 rounded-md bg-orange-500 px-3 py-1.5 text-sm font-medium text-white hover:bg-orange-600 disabled:opacity-50"
+			>
+				<svg class="size-3.5" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+					<path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/>
+				</svg>
+				{deploying ? 'Deploying…' : cfPagesUrl ? 'Redeploy' : 'Deploy'}
+			</button>
+		{/if}
 	</div>
 </div>
 
+{#if deployError}
+	<div class="mb-4 rounded-md border border-destructive/40 bg-destructive/10 px-4 py-3 text-sm text-destructive">
+		{deployError}
+	</div>
+{/if}
 {#if syncError}
 	<div class="mb-4 rounded-md border border-destructive/40 bg-destructive/10 px-4 py-3 text-sm text-destructive">
 		{syncError}

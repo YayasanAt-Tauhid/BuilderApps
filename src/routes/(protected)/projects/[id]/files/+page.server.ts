@@ -108,6 +108,7 @@ export const load: PageServerLoad = async (event) => {
 		githubLogin,
 		supabaseProjects,
 		supabaseConnected: !!supabaseToken,
-		supabaseTokenError
+		supabaseTokenError,
+		cfPagesEnabled: !!(env.CLOUDFLARE_PAGES_API_TOKEN && env.CLOUDFLARE_ACCOUNT_ID)
 	};
 };

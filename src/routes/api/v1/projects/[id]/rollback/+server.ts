@@ -41,6 +41,7 @@ export const POST: RequestHandler = async (event) => {
 		requestMessageId: ulid(), // synthetic — no user message for a rollback
 		status: 'succeeded',
 		version: newVersion,
+		baseVersion: targetVersion, // lineage: restored from this version
 		errorMessage: null,
 		startedAt: now,
 		finishedAt: now,

@@ -58,6 +58,7 @@ export const POST: RequestHandler = async (event) => {
 		requestMessageId: userMessage.id,
 		status: 'running' as const,
 		version: Number(maxVersion) + 1,
+		baseVersion: Number(maxVersion) > 0 ? Number(maxVersion) : null,
 		errorMessage: null,
 		startedAt: now,
 		finishedAt: null,

@@ -90,6 +90,9 @@ export const generations = sqliteTable(
 			.notNull()
 			.default('queued'),
 		version: integer('version').notNull(),
+		// The version this generation was built on top of. Null for the first generation.
+		// Used to walk the lineage chain and filter conversation history correctly after restores.
+		baseVersion: integer('base_version'),
 		errorMessage: text('error_message'),
 		startedAt: integer('started_at'),
 		finishedAt: integer('finished_at'),

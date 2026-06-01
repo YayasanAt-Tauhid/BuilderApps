@@ -139,16 +139,48 @@ export class RealtimeHub {
 				);
 			}
 
-			// ── 2. Load conversation history (last 20 messages, skip current) ──────
-			const history = await db
-				.select()
-				.from(messages)
-				.where(eq(messages.projectId, job.projectId))
-				.orderBy(asc(messages.createdAt));
-			const historyMsgs = history
-				.slice(0, -1) // exclude the user message we just inserted
-				.slice(-20)
-				.map((m) => ({ role: m.role as 'user' | 'assistant', content: m.content }));
+			// ── 2. Load conversation history filtered by generation lineage ──────────
+			// Walk the baseVersion chain from prevVersion to collect only the ancestor
+			// generations. This ensures that after a restore, messages from the
+			// abandoned post-restore generations are not included as context.
+			const historyMsgs: { role: 'user' | 'assistant'; content: string }[] = [];
+			if (job.prevVersion !== null) {
+				const allGens = await db
+					.select({
+						id: generations.id,
+						version: generations.version,
+						requestMessageId: generations.requestMessageId,
+						baseVersion: generations.baseVersion
+					})
+					.from(generations)
+					.where(eq(generations.projectId, job.projectId));
+
+				const genByVersion = new Map(allGens.map((g) => [g.version, g]));
+				const ancestorGenIds = new Set<string>();
+				const ancestorReqMsgIds = new Set<string>();
+
+				let v: number | null = job.prevVersion;
+				while (v !== null) {
+					const gen = genByVersion.get(v);
+					if (!gen) break;
+					ancestorGenIds.add(gen.id);
+					ancestorReqMsgIds.add(gen.requestMessageId);
+					v = gen.baseVersion;
+				}
+
+				const allMessages = await db
+					.select()
+					.from(messages)
+					.where(eq(messages.projectId, job.projectId))
+					.orderBy(asc(messages.createdAt));
+
+				const filtered = allMessages.filter((m) => {
+					if (m.role === 'assistant' && m.generationId) return ancestorGenIds.has(m.generationId);
+					if (m.role === 'user') return ancestorReqMsgIds.has(m.id);
+					return false;
+				});
+				historyMsgs.push(...filtered.slice(-20).map((m) => ({ role: m.role as 'user' | 'assistant', content: m.content })));
+			}
 
 			// ── 3. Choose system prompt ───────────────────────────────────────────
 			const systemPrompt = isEdit ? buildEditPrompt(existingFiles) : PROMPT_NEW;

@@ -52,6 +52,7 @@ export const projects = sqliteTable(
 		status: text('status', { enum: ['draft', 'generating', 'ready', 'error'] })
 			.notNull()
 			.default('draft'),
+		githubPagesUrl: text('github_pages_url'),
 		...timestamps
 	},
 	(t) => [uniqueIndex('projects_user_slug_idx').on(t.userId, t.slug)]

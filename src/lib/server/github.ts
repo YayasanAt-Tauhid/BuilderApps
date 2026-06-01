@@ -174,3 +174,31 @@ export async function pushFilesToRepo(
 
 	return { repoUrl: `https://github.com/${owner}/${repoName}` };
 }
+
+/**
+ * Enable GitHub Pages on a repo (source = root of default branch).
+ * Returns the Pages URL. If Pages is already enabled, fetches the existing URL.
+ */
+export async function enableGithubPages(
+	token: string,
+	owner: string,
+	repoName: string,
+	branch: string
+): Promise<{ pagesUrl: string } | { error: string }> {
+	const repoPath = `/repos/${owner}/${repoName}`;
+
+	const enable = await githubRequest<{ html_url: string }>(token, 'POST', `${repoPath}/pages`, {
+		source: { branch, path: '/' }
+	});
+
+	if (enable.ok) return { pagesUrl: enable.data.html_url };
+
+	// 409 = already enabled — fetch current config.
+	if ((enable as { ok: false; status: number }).status === 409) {
+		const existing = await githubRequest<{ html_url: string }>(token, 'GET', `${repoPath}/pages`);
+		if (existing.ok) return { pagesUrl: existing.data.html_url };
+		return { error: (existing as { ok: false; message: string }).message };
+	}
+
+	return { error: (enable as { ok: false; message: string }).message };
+}

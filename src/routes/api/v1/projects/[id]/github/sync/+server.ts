@@ -2,9 +2,9 @@ import { and, eq, sql } from 'drizzle-orm';
 import type { RequestHandler } from './$types';
 import { ok, errors } from '$lib/server/api';
 import { requireOwnedProject, getEnv } from '$lib/server/context';
-import { generatedFiles, users } from '$lib/server/db/schema';
+import { generatedFiles, projects, users } from '$lib/server/db/schema';
 import { getFileText } from '$lib/server/storage/r2';
-import { pushFilesToRepo } from '$lib/server/github';
+import { pushFilesToRepo, enableGithubPages } from '$lib/server/github';
 
 // Push the latest generated files to a GitHub repo named after the project slug.
 export const POST: RequestHandler = async (event) => {
@@ -57,5 +57,16 @@ export const POST: RequestHandler = async (event) => {
 		return errors.internal();
 	}
 
-	return ok({ repoUrl: result.repoUrl });
+	// Enable GitHub Pages and persist the URL so the preview can use it.
+	const pages = await enableGithubPages(githubAccessToken, githubLogin, project.slug, 'main');
+	const pagesUrl = 'pagesUrl' in pages ? pages.pagesUrl : null;
+
+	if (pagesUrl) {
+		await db
+			.update(projects)
+			.set({ githubPagesUrl: pagesUrl, updatedAt: Date.now() })
+			.where(eq(projects.id, project.id));
+	}
+
+	return ok({ repoUrl: result.repoUrl, pagesUrl });
 };

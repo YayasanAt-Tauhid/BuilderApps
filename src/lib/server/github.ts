@@ -84,32 +84,9 @@ export async function pushFilesToRepo(
 	files: FileContent[],
 	commitMessage: string
 ): Promise<{ repoUrl: string; commitSha: string } | { error: string }> {
-	// 0. Pre-flight: validate token and verify it has 'repo' scope.
-	const userRes = await fetch(`${GITHUB_API}/user`, {
-		headers: {
-			Authorization: `Bearer ${token}`,
-			Accept: 'application/vnd.github+json',
-			'X-GitHub-Api-Version': '2022-11-28',
-			'User-Agent': USER_AGENT
-		}
-	});
-	if (!userRes.ok) {
-		return {
-			error:
-				'Token GitHub tidak valid atau sudah expired. Buka Settings → GitHub → Disconnect, lalu Connect ulang.'
-		};
-	}
-	const scopes = userRes.headers.get('x-oauth-scopes') ?? '';
-	if (!scopes.split(',').map((s) => s.trim()).includes('repo')) {
-		return {
-			error:
-				'Token GitHub tidak punya scope "repo". Buka Settings → GitHub → Disconnect, lalu Connect ulang dan pastikan klik "Authorize" tanpa uncheck permission apapun.'
-		};
-	}
-
 	const repoPath = `/repos/${owner}/${repoName}`;
 
-	// 1. Ensure repo exists — create with auto_init so there is an initial commit.
+	// 1. Ensure repo exists — create with auto_init so git storage is ready.
 	let defaultBranch: string;
 	const repoCheck = await githubRequest<{ default_branch: string }>(token, 'GET', repoPath);
 	if (!repoCheck.ok) {
@@ -122,69 +99,77 @@ export async function pushFilesToRepo(
 		});
 		if (!created.ok) return { error: created.message };
 		defaultBranch = created.data.default_branch ?? 'main';
-		// Small delay to allow GitHub to finish initializing the git storage.
 		await new Promise((r) => setTimeout(r, 1500));
 	} else {
 		defaultBranch = repoCheck.data.default_branch;
 	}
 
-	// 2. Get HEAD commit sha of the default branch.
+	// 2. Get current HEAD — if repo is empty (no commits yet), initialize via Contents API first.
+	let parentSha: string | undefined;
 	const headResult = await githubRequest<{ object: { sha: string } }>(
 		token,
 		'GET',
 		`${repoPath}/git/refs/heads/${defaultBranch}`
 	);
-	if (!headResult.ok) return { error: `[step2-head] ${headResult.message}` };
-	const headCommitSha = headResult.data.object.sha;
+	if (headResult.ok) {
+		parentSha = headResult.data.object.sha;
+	} else {
+		const initResult = await githubRequest<{ commit: { sha: string } }>(
+			token,
+			'PUT',
+			`${repoPath}/contents/.gitkeep`,
+			{ message: 'Initialize repository', content: 'Cg==' }
+		);
+		if (!initResult.ok) return { error: (initResult as { ok: false; message: string }).message };
+		parentSha = initResult.data.commit.sha;
+	}
 
-	// 3. Push all files via GraphQL createCommitOnBranch (atomic, no blob/tree steps needed).
-	const additions = files.map((f) => ({
-		path: f.path,
-		contents: btoa(unescape(encodeURIComponent(f.content)))
-	}));
+	// 3. Create a blob for every file (utf-8 encoding).
+	let blobs: { path: string; mode: '100644'; type: 'blob'; sha: string }[];
+	try {
+		blobs = await Promise.all(
+			files.map(async (f) => {
+				const result = await githubRequest<{ sha: string }>(
+					token,
+					'POST',
+					`${repoPath}/git/blobs`,
+					{ content: f.content, encoding: 'utf-8' }
+				);
+				if (!result.ok) throw new Error(`blob:${f.path}: ${result.message}`);
+				return { path: f.path, mode: '100644' as const, type: 'blob' as const, sha: result.data.sha };
+			})
+		);
+	} catch (e) {
+		return { error: e instanceof Error ? e.message : 'Blob creation failed' };
+	}
 
-	const gqlRes = await fetch('https://api.github.com/graphql', {
-		method: 'POST',
-		headers: {
-			Authorization: `Bearer ${token}`,
-			'Content-Type': 'application/json',
-			'User-Agent': USER_AGENT
-		},
-		body: JSON.stringify({
-			query: `mutation($input: CreateCommitOnBranchInput!) {
-				createCommitOnBranch(input: $input) { commit { oid } }
-			}`,
-			variables: {
-				input: {
-					branch: { repositoryNameWithOwner: `${owner}/${repoName}`, branchName: defaultBranch },
-					message: { headline: commitMessage },
-					fileChanges: { additions },
-					expectedHeadOid: headCommitSha
-				}
-			}
-		})
+	// 4. Create tree (no base_tree — replaces entire tree with generated files).
+	const treeResult = await githubRequest<{ sha: string }>(token, 'POST', `${repoPath}/git/trees`, {
+		tree: blobs
 	});
-
-	if (!gqlRes.ok) {
-		const txt = await gqlRes.text().catch(() => gqlRes.statusText);
-		return { error: `[step3-gql:${gqlRes.status}] ${txt.slice(0, 300)}` };
+	if (!treeResult.ok) {
+		console.error(`[github/push] tree FAILED: ${treeResult.status} ${treeResult.message} owner=${owner} repo=${repoName}`);
+		return { error: `[step4-tree:${treeResult.status}] ${treeResult.message}` };
 	}
 
-	const gqlData = (await gqlRes.json()) as {
-		data?: { createCommitOnBranch?: { commit?: { oid: string } } };
-		errors?: { message: string }[];
-	};
+	// 5. Create commit.
+	const newCommit = await githubRequest<{ sha: string }>(token, 'POST', `${repoPath}/git/commits`, {
+		message: commitMessage,
+		tree: treeResult.data.sha,
+		parents: parentSha ? [parentSha] : []
+	});
+	if (!newCommit.ok) return { error: `[step5-commit] ${newCommit.message}` };
 
-	if (gqlData.errors?.length) {
-		const msg = gqlData.errors.map((e) => e.message).join('; ');
-		console.error(`[github/push] GraphQL error: ${msg} | owner=${owner} repo=${repoName} scopes=${scopes}`);
-		return { error: `[step3-gql-err] ${msg}` };
-	}
+	// 6. Update branch ref (force to cleanly replace init commit if needed).
+	const update = await githubRequest(
+		token,
+		'PATCH',
+		`${repoPath}/git/refs/heads/${defaultBranch}`,
+		{ sha: newCommit.data.sha, force: true }
+	);
+	if (!update.ok) return { error: `[step6-ref] ${(update as { ok: false; message: string }).message}` };
 
-	const commitSha = gqlData.data?.createCommitOnBranch?.commit?.oid;
-	if (!commitSha) return { error: '[step3-gql-nooid] No commit oid returned' };
-
-	return { repoUrl: `https://github.com/${owner}/${repoName}`, commitSha };
+	return { repoUrl: `https://github.com/${owner}/${repoName}`, commitSha: newCommit.data.sha };
 }
 
 /**

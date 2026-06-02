@@ -147,6 +147,9 @@
 		<p class="mb-4 text-sm text-muted-foreground">
 			Push generated projects directly to a GitHub repository.
 		</p>
+		<p class="mb-4 text-xs text-muted-foreground/70">
+			Saat authorize di GitHub, pastikan tidak uncheck permission apapun agar push bisa berjalan.
+		</p>
 		<a
 			href="/api/v1/auth/github"
 			class="inline-flex items-center gap-2 rounded-xl bg-foreground px-4 py-2 text-sm font-medium text-background transition hover:opacity-80"

@@ -84,12 +84,22 @@ export async function pushFilesToRepo(
 	files: FileContent[],
 	commitMessage: string
 ): Promise<{ repoUrl: string; commitSha: string } | { error: string }> {
-	// 0. Pre-flight: verify token has 'repo' scope (required for write operations).
-	const scopeRes = await fetch(`${GITHUB_API}/user`, {
-		method: 'HEAD',
-		headers: { Authorization: `Bearer ${token}`, 'User-Agent': USER_AGENT }
+	// 0. Pre-flight: validate token and verify it has 'repo' scope.
+	const userRes = await fetch(`${GITHUB_API}/user`, {
+		headers: {
+			Authorization: `Bearer ${token}`,
+			Accept: 'application/vnd.github+json',
+			'X-GitHub-Api-Version': '2022-11-28',
+			'User-Agent': USER_AGENT
+		}
 	});
-	const scopes = scopeRes.headers.get('x-oauth-scopes') ?? '';
+	if (!userRes.ok) {
+		return {
+			error:
+				'Token GitHub tidak valid atau sudah expired. Buka Settings → GitHub → Disconnect, lalu Connect ulang.'
+		};
+	}
+	const scopes = userRes.headers.get('x-oauth-scopes') ?? '';
 	if (!scopes.split(',').map((s) => s.trim()).includes('repo')) {
 		return {
 			error:

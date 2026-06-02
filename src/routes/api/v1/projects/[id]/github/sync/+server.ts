@@ -48,11 +48,14 @@ export const POST: RequestHandler = async (event) => {
 		}))
 	);
 
+	// Exclude .github/ — workflow files require the `workflow` OAuth scope.
+	const pushableFiles = fileContents.filter((f) => !f.path.startsWith('.github/'));
+
 	const result = await pushFilesToRepo(
 		githubAccessToken,
 		githubLogin,
 		project.slug,
-		fileContents,
+		pushableFiles,
 		`BuilderPro: ${project.name} v${version}`
 	);
 

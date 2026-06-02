@@ -103,6 +103,10 @@ export async function pushFilesToRepo(
 	if (!scopeList.includes('repo') && !scopeList.includes('public_repo')) {
 		return { error: `Token tidak punya scope repo/public_repo (scopes: "${scopes}"). Buka Settings → GitHub → Disconnect, lalu Connect ulang.` };
 	}
+	const tokenOwner = ((await userRes.json()) as { login?: string }).login ?? '(unknown)';
+	if (tokenOwner.toLowerCase() !== owner.toLowerCase()) {
+		return { error: `Token milik @${tokenOwner} tapi repo akan dibuat sebagai @${owner}. Buka Settings → GitHub → Disconnect, lalu Connect ulang.` };
+	}
 	console.log(`[push] token ok, scopes="${scopes}", owner=${owner}, repo=${repoName}, files=${files.length}`);
 
 	// 1. Ensure repo exists — create with auto_init so git storage is ready.

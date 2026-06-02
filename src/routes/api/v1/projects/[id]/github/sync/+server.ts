@@ -4,7 +4,7 @@ import { ok, errors } from '$lib/server/api';
 import { requireOwnedProject, getEnv } from '$lib/server/context';
 import { generatedFiles, projects, users } from '$lib/server/db/schema';
 import { getFileText } from '$lib/server/storage/r2';
-import { pushFilesToRepo, enableGithubPages, registerWebhook } from '$lib/server/github';
+import { pushFilesToRepo, registerWebhook, setRepoSecrets } from '$lib/server/github';
 
 // Push the latest generated files to a GitHub repo named after the project slug.
 export const POST: RequestHandler = async (event) => {
@@ -48,14 +48,11 @@ export const POST: RequestHandler = async (event) => {
 		}))
 	);
 
-	// Exclude .github/ — workflow files require the `workflow` OAuth scope.
-	const pushableFiles = fileContents.filter((f) => !f.path.startsWith('.github/'));
-
 	const result = await pushFilesToRepo(
 		githubAccessToken,
 		githubLogin,
 		project.slug,
-		pushableFiles,
+		fileContents,
 		`BuilderPro: ${project.name} v${version}`
 	);
 
@@ -64,34 +61,55 @@ export const POST: RequestHandler = async (event) => {
 		return errors.badRequest(result.error);
 	}
 
-	// Enable GitHub Pages and register webhook (if not already done).
-	const [pages, webhookResult] = await Promise.all([
-		enableGithubPages(githubAccessToken, githubLogin, project.slug, 'main'),
-		project.githubWebhookId
-			? Promise.resolve(null)
-			: registerWebhook(
-					githubAccessToken,
-					githubLogin,
-					project.slug,
-					`${env.APP_URL ?? ''}/api/v1/webhooks/github`,
-					env.GITHUB_WEBHOOK_SECRET ?? ''
-				)
-	]);
+	// Register webhook (if not already done). GitHub Pages is no longer used — R2 serves the dist.
+	const webhookResult = project.githubWebhookId
+		? null
+		: await registerWebhook(
+				githubAccessToken,
+				githubLogin,
+				project.slug,
+				`${env.APP_URL ?? ''}/api/v1/webhooks/github`,
+				env.GITHUB_WEBHOOK_SECRET ?? ''
+			);
 
-	const pagesUrl = 'pagesUrl' in pages ? pages.pagesUrl : null;
 	const webhookId =
 		webhookResult && 'id' in webhookResult ? webhookResult.id : project.githubWebhookId;
+
+	// Auto-inject GitHub Actions secrets so the CI pipeline can upload dist/ to R2.
+	const deploySecrets: Record<string, string> = {};
+	if (env.CLOUDFLARE_ACCOUNT_ID) deploySecrets['CF_R2_ACCOUNT_ID'] = env.CLOUDFLARE_ACCOUNT_ID;
+	if (env.R2_ACCESS_KEY_ID) deploySecrets['CF_R2_ACCESS_KEY_ID'] = env.R2_ACCESS_KEY_ID;
+	if (env.R2_SECRET_ACCESS_KEY) deploySecrets['CF_R2_SECRET_ACCESS_KEY'] = env.R2_SECRET_ACCESS_KEY;
+	if (env.R2_BUCKET_NAME) deploySecrets['CF_R2_BUCKET_NAME'] = env.R2_BUCKET_NAME;
+	deploySecrets['PROJECT_ID'] = project.id;
+	if (env.APP_URL) deploySecrets['BUILDERPRO_WEBHOOK_URL'] = `${env.APP_URL}/api/v1/webhooks/build-complete`;
+	if (env.BUILDERPRO_DEPLOY_SECRET) deploySecrets['BUILDERPRO_DEPLOY_SECRET'] = env.BUILDERPRO_DEPLOY_SECRET;
+	if (project.supabaseUrl) deploySecrets['VITE_SUPABASE_URL'] = project.supabaseUrl;
+	if (project.supabaseAnonKey) deploySecrets['VITE_SUPABASE_ANON_KEY'] = project.supabaseAnonKey;
+
+	const failedSecrets = Object.keys(deploySecrets).length > 0
+		? await setRepoSecrets(githubAccessToken, githubLogin, project.slug, deploySecrets)
+		: [];
+
+	if (failedSecrets.length > 0) {
+		console.warn(`[github/sync] Failed to set secrets: ${failedSecrets.join(', ')}`);
+	}
 
 	await db
 		.update(projects)
 		.set({
 			githubSyncedVersion: version,
 			githubLastCommitSha: result.commitSha,
-			...(pagesUrl ? { githubPagesUrl: pagesUrl } : {}),
 			...(webhookId ? { githubWebhookId: webhookId } : {}),
 			updatedAt: Date.now()
 		})
 		.where(eq(projects.id, project.id));
 
-	return ok({ repoUrl: result.repoUrl, pagesUrl, syncedVersion: version, commitSha: result.commitSha });
+	return ok({
+		repoUrl: result.repoUrl,
+		syncedVersion: version,
+		commitSha: result.commitSha,
+		deploySecretsSet: failedSecrets.length === 0,
+		failedSecrets
+	});
 };

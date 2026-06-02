@@ -3,12 +3,12 @@
 // hub.ts via buildTemplateFiles() — the AI only generates app-specific files.
 
 /** First generation — SvelteKit + TypeScript + Supabase. Boilerplate pre-injected. */
-export const PROMPT_NEW = `You are BuilderPro, an expert full-stack engineer. Build modern web apps with SvelteKit + TypeScript + Supabase + Tailwind CSS, deployable to Cloudflare Pages.
+export const PROMPT_NEW = `You are BuilderPro, an expert full-stack engineer. Build modern web apps with SvelteKit + TypeScript + Supabase + Tailwind CSS. The project uses adapter-static and is deployed to Cloudflare R2 via GitHub Actions — the built dist/ folder is served as a static site.
 
 These boilerplate files are ALREADY CREATED — do NOT output them:
   package.json, svelte.config.js, vite.config.ts, tsconfig.json,
   src/app.html, src/app.css, src/routes/+layout.svelte,
-  .env.example, wrangler.toml, .github/workflows/deploy.yml
+  .env.example, .github/workflows/deploy.yml
 
 Output ONLY app-specific files using this format (no markdown code fences):
 === FILE: relative/path/to/file.ext ===
@@ -67,7 +67,8 @@ SVELTE 5 + SVELTEKIT RULES:
 - <script lang="ts"> in every .svelte file
 - Svelte 5 runes ONLY: $state() $derived() $effect() $props() — no $: reactive, no stores
 - Tailwind v4 utility classes for ALL styling — no inline styles, no <style> blocks
-- SvelteKit: +page.svelte / +page.ts / +layout.svelte / +server.ts conventions
+- SvelteKit: +page.svelte / +page.ts / +layout.svelte conventions
+- STATIC ADAPTER: Do NOT generate +page.server.ts or +server.ts — they don't work with adapter-static. All data fetching must be client-side via Supabase.
 - CRITICAL: Output COMPLETE files — never truncate with "// ... rest" or similar
 - No TODO comments — implement real, working functionality`;
 

@@ -34,4 +34,11 @@ export interface Env {
 	/** Cloudflare Pages deployment (app worker — for one-click deploy feature). */
 	CLOUDFLARE_PAGES_API_TOKEN?: string;
 	CLOUDFLARE_ACCOUNT_ID?: string;
+	/** R2 S3-compatible API credentials — injected as GitHub Actions secrets so CI can upload dist/ to R2. */
+	R2_ACCESS_KEY_ID?: string;
+	R2_SECRET_ACCESS_KEY?: string;
+	/** R2 bucket name (defaults to the BUCKET binding name, but explicit for S3 API calls). */
+	R2_BUCKET_NAME?: string;
+	/** Shared secret for the /api/v1/webhooks/build-complete endpoint called by GitHub Actions. */
+	BUILDERPRO_DEPLOY_SECRET?: string;
 }

@@ -21,7 +21,7 @@ export function buildTemplateFiles(slug: string): Map<string, string> {
 					'@supabase/supabase-js': '^2.0.0'
 				},
 				devDependencies: {
-					'@sveltejs/adapter-cloudflare': '^5.0.0',
+					'@sveltejs/adapter-static': '^3.0.0',
 					'@sveltejs/kit': '^2.0.0',
 					'@sveltejs/vite-plugin-svelte': '^5.0.0',
 					'@tailwindcss/vite': '^4.0.0',
@@ -36,10 +36,16 @@ export function buildTemplateFiles(slug: string): Map<string, string> {
 		)
 	);
 
+	// adapter-static: outputs to dist/ — served directly from Cloudflare R2.
+	// fallback: 'index.html' enables SPA-style client-side routing.
 	files.set(
 		'svelte.config.js',
-		`import adapter from '@sveltejs/adapter-cloudflare';
-export default { kit: { adapter: adapter() } };
+		`import adapter from '@sveltejs/adapter-static';
+export default {
+  kit: {
+    adapter: adapter({ pages: 'dist', assets: 'dist', fallback: 'index.html' })
+  }
+};
 `
 	);
 
@@ -85,6 +91,67 @@ export default defineConfig({ plugins: [tailwindcss(), sveltekit()] });
 		'.env.example',
 		`VITE_SUPABASE_URL=https://your-project.supabase.co
 VITE_SUPABASE_ANON_KEY=your-anon-key
+`
+	);
+
+	// GitHub Actions workflow: build → upload dist/ to R2 → notify BuilderPro.
+	// Secrets are auto-injected by BuilderPro when the project is synced to GitHub.
+	files.set(
+		'.github/workflows/deploy.yml',
+		`name: Build & Deploy to R2
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: latest
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build
+        run: pnpm build
+        env:
+          VITE_SUPABASE_URL: \${{ secrets.VITE_SUPABASE_URL }}
+          VITE_SUPABASE_ANON_KEY: \${{ secrets.VITE_SUPABASE_ANON_KEY }}
+
+      - name: Upload dist to Cloudflare R2
+        run: |
+          aws s3 sync dist/ "s3://\${CF_R2_BUCKET}/published/\${PROJECT_ID}/" \\
+            --endpoint-url "https://\${CF_R2_ACCOUNT_ID}.r2.cloudflarestorage.com" \\
+            --delete --no-progress
+        env:
+          AWS_ACCESS_KEY_ID: \${{ secrets.CF_R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: \${{ secrets.CF_R2_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: auto
+          CF_R2_ACCOUNT_ID: \${{ secrets.CF_R2_ACCOUNT_ID }}
+          CF_R2_BUCKET: \${{ secrets.CF_R2_BUCKET_NAME }}
+          PROJECT_ID: \${{ secrets.PROJECT_ID }}
+
+      - name: Notify BuilderPro
+        if: success()
+        run: |
+          curl -fsS -X POST "\${BUILDERPRO_WEBHOOK_URL}" \\
+            -H "Authorization: Bearer \${BUILDERPRO_DEPLOY_SECRET}" \\
+            -H "Content-Type: application/json" \\
+            -d "{\\"projectId\\":\\"\${PROJECT_ID}\\"}"
+        env:
+          BUILDERPRO_WEBHOOK_URL: \${{ secrets.BUILDERPRO_WEBHOOK_URL }}
+          BUILDERPRO_DEPLOY_SECRET: \${{ secrets.BUILDERPRO_DEPLOY_SECRET }}
+          PROJECT_ID: \${{ secrets.PROJECT_ID }}
 `
 	);
 

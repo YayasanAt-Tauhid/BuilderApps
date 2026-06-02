@@ -19,7 +19,8 @@ export const GET: RequestHandler = async (event) => {
 	const params = new URLSearchParams({
 		client_id: env.GITHUB_CLIENT_ID,
 		state,
-		scope: 'repo'
+		// workflow scope required to push .github/workflows/ files via Contents API.
+		scope: 'repo workflow'
 	});
 
 	throw redirect(302, `https://github.com/login/oauth/authorize?${params.toString()}`);

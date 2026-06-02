@@ -31,16 +31,19 @@ export const POST: RequestHandler = async (event) => {
 
 	if (rows.length === 0) return errors.notFound('No files found');
 
-	// SvelteKit projects need a build step — instruct to use GitHub + CI/CD.
+	// SvelteKit projects: build runs in GitHub Actions → dist/ uploaded to R2 → served at /apps/{slug}/.
 	if (isSvelteKitProject(rows.map((r) => r.path))) {
 		const repoUrl = project.githubLastCommitSha
-			? `https://github.com/${project.slug}`
+			? `https://github.com/${project.githubLastCommitSha.slice(0, 0)}${project.slug}`
 			: null;
+		const liveUrl = project.cfPagesUrl ?? null;
 		return ok({
 			sveltekit: true,
-			message:
-				'Push to GitHub to deploy. The generated .github/workflows/deploy.yml will build and deploy to Cloudflare Pages automatically.',
+			message: liveUrl
+				? 'Project is live. Push new changes via GitHub Sync to redeploy.'
+				: 'Sync to GitHub first — GitHub Actions will build and deploy automatically to R2.',
 			repoUrl,
+			liveUrl,
 			version
 		});
 	}

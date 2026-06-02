@@ -140,7 +140,12 @@ export const GET: RequestHandler = async (event) => {
 
 	const allPaths = rows.map((r) => r.path);
 
-	// SvelteKit project → show build-required notice (can't serve .svelte source directly).
+	// SvelteKit project with live URL → redirect to the built R2-served site.
+	if (isSvelteKitProject(allPaths) && project.cfPagesUrl) {
+		return Response.redirect(project.cfPagesUrl, 302);
+	}
+
+	// SvelteKit project not yet built → show build-required notice.
 	if (isSvelteKitProject(allPaths)) {
 		return new Response(buildkitNotice(project.name), {
 			headers: {

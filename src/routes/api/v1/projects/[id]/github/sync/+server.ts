@@ -12,7 +12,10 @@ export const POST: RequestHandler = async (event) => {
 
 	// GitHub token lives in the users table (not in the session cache).
 	const rows = await db
-		.select({ githubAccessToken: users.githubAccessToken, githubLogin: users.githubLogin })
+		.select({
+			githubAccessToken: users.githubAccessToken,
+			githubLogin: users.githubLogin
+		})
 		.from(users)
 		.where(eq(users.id, user.id))
 		.limit(1);
@@ -45,16 +48,20 @@ export const POST: RequestHandler = async (event) => {
 		}))
 	);
 
+	// Exclude .github/ — workflow files require the `workflow` OAuth scope.
+	const pushableFiles = fileContents.filter((f) => !f.path.startsWith('.github/'));
+
 	const result = await pushFilesToRepo(
 		githubAccessToken,
 		githubLogin,
 		project.slug,
-		fileContents,
+		pushableFiles,
 		`BuilderPro: ${project.name} v${version}`
 	);
 
 	if ('error' in result) {
-		return errors.internal();
+		console.error(`[github/sync] pushFilesToRepo failed: ${result.error}`);
+		return errors.badRequest(result.error);
 	}
 
 	// Enable GitHub Pages and register webhook (if not already done).

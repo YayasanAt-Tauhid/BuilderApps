@@ -92,6 +92,7 @@ export const POST: RequestHandler = async (event) => {
 		requestMessageId: ulid(),
 		status: 'succeeded',
 		version: newVersion,
+		baseVersion: Number(row.maxVersion) > 0 ? Number(row.maxVersion) : null,
 		errorMessage: null,
 		startedAt: now,
 		finishedAt: now,

@@ -26,6 +26,10 @@ export const users = sqliteTable('users', {
 		.default('system'),
 	githubAccessToken: text('github_access_token'),
 	githubLogin: text('github_login'),
+	supabaseAccessToken: text('supabase_access_token'),
+	supabaseRefreshToken: text('supabase_refresh_token'),
+	cloudflareAccessToken: text('cloudflare_access_token'),
+	cloudflareRefreshToken: text('cloudflare_refresh_token'),
 	...timestamps
 });
 
@@ -56,6 +60,10 @@ export const projects = sqliteTable(
 		githubSyncedVersion: integer('github_synced_version'),
 		githubLastCommitSha: text('github_last_commit_sha'),
 		githubWebhookId: integer('github_webhook_id'),
+		supabaseProjectRef: text('supabase_project_ref'),
+		supabaseUrl: text('supabase_url'),
+		supabaseAnonKey: text('supabase_anon_key'),
+		cfPagesUrl: text('cf_pages_url'),
 		...timestamps
 	},
 	(t) => [uniqueIndex('projects_user_slug_idx').on(t.userId, t.slug)]
@@ -90,6 +98,9 @@ export const generations = sqliteTable(
 			.notNull()
 			.default('queued'),
 		version: integer('version').notNull(),
+		// The version this generation was built on top of. Null for the first generation.
+		// Used to walk the lineage chain and filter conversation history correctly after restores.
+		baseVersion: integer('base_version'),
 		errorMessage: text('error_message'),
 		startedAt: integer('started_at'),
 		finishedAt: integer('finished_at'),

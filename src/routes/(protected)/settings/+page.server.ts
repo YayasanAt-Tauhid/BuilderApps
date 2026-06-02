@@ -10,15 +10,25 @@ export const load: PageServerLoad = async (event) => {
 	const user = requireUser(event);
 	const db = getDb(event);
 
-	const [usage, githubRow] = await Promise.all([
+	const [usage, accountRow] = await Promise.all([
 		getUsage(db, user.id),
-		db.select({ githubLogin: users.githubLogin }).from(users).where(eq(users.id, user.id)).limit(1)
+		db
+			.select({
+				githubLogin: users.githubLogin,
+				supabaseAccessToken: users.supabaseAccessToken,
+				cloudflareAccessToken: users.cloudflareAccessToken
+			})
+			.from(users)
+			.where(eq(users.id, user.id))
+			.limit(1)
 	]);
 
 	return {
 		usage,
 		preferences: { locale: user.locale, theme: user.theme },
-		githubLogin: githubRow[0]?.githubLogin ?? null
+		githubLogin: accountRow[0]?.githubLogin ?? null,
+		supabaseConnected: !!accountRow[0]?.supabaseAccessToken,
+		cloudflareConnected: !!accountRow[0]?.cloudflareAccessToken
 	};
 };
 
@@ -52,6 +62,39 @@ export const actions: Actions = {
 		await db
 			.update(users)
 			.set({ githubAccessToken: null, githubLogin: null, updatedAt: Date.now() })
+			.where(eq(users.id, user.id));
+		return { success: true };
+	},
+
+	disconnectSupabase: async (event) => {
+		const user = requireUser(event);
+		const db = getDb(event);
+		await db
+			.update(users)
+			.set({ supabaseAccessToken: null, supabaseRefreshToken: null, updatedAt: Date.now() })
+			.where(eq(users.id, user.id));
+		return { success: true };
+	},
+
+	disconnectCloudflare: async (event) => {
+		const user = requireUser(event);
+		const db = getDb(event);
+		await db
+			.update(users)
+			.set({ cloudflareAccessToken: null, cloudflareRefreshToken: null, updatedAt: Date.now() })
+			.where(eq(users.id, user.id));
+		return { success: true };
+	},
+
+	saveCloudflareToken: async (event) => {
+		const user = requireUser(event);
+		const form = await event.request.formData();
+		const token = (form.get('token') as string | null)?.trim() ?? '';
+		if (!token) return fail(400, { error: 'Token is required.' });
+		const db = getDb(event);
+		await db
+			.update(users)
+			.set({ cloudflareAccessToken: token, updatedAt: Date.now() })
 			.where(eq(users.id, user.id));
 		return { success: true };
 	}

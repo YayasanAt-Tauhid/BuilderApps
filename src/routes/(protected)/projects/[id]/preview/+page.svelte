@@ -7,55 +7,47 @@
 
 	const projectId = $derived(page.params.id);
 	const pagesUrl = $derived(data.project.githubPagesUrl);
-	// Bust iframe cache on every page load so restore/generate shows fresh content.
 	const cacheBust = Date.now();
 </script>
 
-<svelte:head><title>{m.project_preview()}</title></svelte:head>
+<svelte:head><title>{m.project_preview()} — {data.project.name}</title></svelte:head>
 
-<div class="mb-4 flex items-center gap-3">
-	<a href="/projects/{projectId}" class="text-sm text-muted-foreground hover:text-primary">← Back</a>
-	<h1 class="text-xl font-bold">{m.project_preview()}</h1>
+<div class="mb-4 flex flex-wrap items-center gap-2">
+	<a href="/projects/{projectId}" class="shrink-0 rounded-lg p-1.5 text-muted-foreground transition hover:bg-muted" aria-label="Back">
+		<svg xmlns="http://www.w3.org/2000/svg" class="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+			<path d="M19 12H5M12 5l-7 7 7 7"/>
+		</svg>
+	</a>
+	<h1 class="text-lg font-bold sm:text-xl">{m.project_preview()}</h1>
 
 	{#if pagesUrl}
 		<span class="flex items-center gap-1.5 rounded-full bg-green-500/10 px-2.5 py-0.5 text-xs font-medium text-green-700 dark:text-green-400">
 			<span class="size-1.5 rounded-full bg-green-500"></span>
-			GitHub Pages
+			Live
 		</span>
-		<a
-			href={pagesUrl}
-			target="_blank"
-			rel="noopener noreferrer"
-			class="ml-auto text-sm text-muted-foreground hover:text-primary"
-		>
-			↗ Open in new tab
+		<a href={pagesUrl} target="_blank" rel="noopener noreferrer"
+			class="ml-auto rounded-lg border px-3 py-1.5 text-sm text-muted-foreground transition hover:bg-muted">
+			↗ Open
 		</a>
-	{:else}
-		<span class="flex items-center gap-1.5 rounded-full bg-muted px-2.5 py-0.5 text-xs font-medium text-muted-foreground">
-			<span class="size-1.5 rounded-full bg-muted-foreground/50"></span>
-			Internal preview
-		</span>
 	{/if}
 </div>
 
 {#if pagesUrl}
-	<p class="mb-3 text-sm text-muted-foreground">
-		Live preview via GitHub Pages — may take a minute to build after the first sync.
-	</p>
 	<iframe
-		title="GitHub Pages preview"
+		title="Preview"
 		src="{pagesUrl}?t={cacheBust}"
-		class="h-[70vh] w-full rounded-lg border bg-white"
+		class="h-[calc(100dvh-12rem)] min-h-64 w-full rounded-2xl border bg-white shadow-sm sm:h-[75vh]"
 	></iframe>
 {:else}
-	<p class="mb-3 text-sm text-muted-foreground">
-		Sandboxed preview of the generated frontend only (not full-stack execution).
-		<a href="/projects/{projectId}/files" class="underline hover:text-primary">Sync to GitHub</a> to get a live shareable preview.
-	</p>
-	<iframe
-		title="Frontend preview"
-		src="/api/v1/projects/{projectId}/preview?t={cacheBust}"
-		sandbox="allow-scripts"
-		class="h-[70vh] w-full rounded-lg border bg-white"
-	></iframe>
+	<div class="flex flex-col items-center gap-4 rounded-2xl border border-dashed py-20 text-center">
+		<div class="text-4xl">🚀</div>
+		<div>
+			<p class="font-medium">Belum ada preview</p>
+			<p class="mt-1 text-sm text-muted-foreground">Push ke GitHub untuk deploy dan lihat live preview.</p>
+		</div>
+		<a href="/projects/{projectId}/files"
+			class="rounded-xl bg-foreground px-4 py-2 text-sm font-medium text-background transition hover:opacity-80">
+			Push ke GitHub
+		</a>
+	</div>
 {/if}

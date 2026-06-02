@@ -3,22 +3,26 @@ import { createDb } from '../../../src/lib/server/db';
 import { generations, generatedFiles, messages, projects, users } from '../../../src/lib/server/db/schema';
 import { streamChat, estimateTokens, DEFAULT_MODEL } from '../../../src/lib/server/ai';
 import { parseOutput, applyPatch } from '../../../src/lib/server/ai/parser';
-import { buildEditPrompt, PROMPT_NEW } from '../../../src/lib/server/ai/prompts';
+import { buildEditPrompt, buildNewPrompt, type SupabaseContext } from '../../../src/lib/server/ai/prompts';
+import { buildTemplateFiles } from '../../../src/lib/server/ai/templates';
 import { fileKey, putFile, getFileText, contentHash } from '../../../src/lib/server/storage/r2';
 import { recordUsage } from '../../../src/lib/server/usage';
 import { ulid } from '../../../src/lib/utils/ulid';
 import type { Env } from '../../../src/lib/server/env';
 import { pushFilesToRepo, enableGithubPages, registerWebhook } from '../../../src/lib/server/github';
+import { runMigration } from '../../../src/lib/server/supabase';
 
 interface StartJob {
 	generationId: string;
 	projectId: string;
 	userId: string;
+	slug: string;
 	version: number;
 	/** null = first generation; otherwise the version to use as edit base. */
 	prevVersion: number | null;
 	prompt: string;
 	model?: string;
+	supabase?: SupabaseContext;
 }
 
 const enc = new TextEncoder();
@@ -139,21 +143,76 @@ export class RealtimeHub {
 				);
 			}
 
-			// ── 2. Load conversation history (last 20 messages, skip current) ──────
-			const history = await db
-				.select()
-				.from(messages)
-				.where(eq(messages.projectId, job.projectId))
-				.orderBy(asc(messages.createdAt));
-			const historyMsgs = history
-				.slice(0, -1) // exclude the user message we just inserted
-				.slice(-20)
-				.map((m) => ({ role: m.role as 'user' | 'assistant', content: m.content }));
+			// ── 2. Load conversation history filtered by generation lineage ──────────
+			// Walk the baseVersion chain from prevVersion to collect only the ancestor
+			// generations. This ensures that after a restore, messages from the
+			// abandoned post-restore generations are not included as context.
+			const historyMsgs: { role: 'user' | 'assistant'; content: string }[] = [];
+			if (job.prevVersion !== null) {
+				const allGens = await db
+					.select({
+						id: generations.id,
+						version: generations.version,
+						requestMessageId: generations.requestMessageId,
+						baseVersion: generations.baseVersion
+					})
+					.from(generations)
+					.where(eq(generations.projectId, job.projectId));
 
-			// ── 3. Choose system prompt ───────────────────────────────────────────
-			const systemPrompt = isEdit ? buildEditPrompt(existingFiles) : PROMPT_NEW;
+				const genByVersion = new Map(allGens.map((g) => [g.version, g]));
+				const ancestorGenIds = new Set<string>();
+				const ancestorReqMsgIds = new Set<string>();
 
-			// ── 4. Stream generation ──────────────────────────────────────────────
+				let v: number | null = job.prevVersion;
+				while (v !== null) {
+					const gen = genByVersion.get(v);
+					if (!gen) break;
+					ancestorGenIds.add(gen.id);
+					ancestorReqMsgIds.add(gen.requestMessageId);
+					v = gen.baseVersion;
+				}
+
+				const allMessages = await db
+					.select()
+					.from(messages)
+					.where(eq(messages.projectId, job.projectId))
+					.orderBy(asc(messages.createdAt));
+
+				const filtered = allMessages.filter((m) => {
+					if (m.role === 'assistant' && m.generationId) return ancestorGenIds.has(m.generationId);
+					if (m.role === 'user') return ancestorReqMsgIds.has(m.id);
+					return false;
+				});
+				// Only include user messages in history. Assistant messages contain
+				// verbose FILE/PATCH blocks that confuse the model into mimicking
+				// that format instead of generating real output. The current file
+				// state is already provided in full by buildEditPrompt, so the model
+				// only needs to know the sequence of user requests.
+				historyMsgs.push(
+					...filtered
+						.filter((m) => m.role === 'user')
+						.slice(-10)
+						.map((m) => ({ role: 'user' as const, content: m.content }))
+				);
+			}
+
+			// ── 3. Pre-inject boilerplate for new projects (saves ~1000 tokens) ─────
+			// Template files (package.json, svelte.config.js, vite.config.ts, etc.)
+			// are identical across all projects — no need for the AI to generate them.
+			// They are written to finalFiles before the AI call so the AI only needs
+			// to generate app-specific files (+page.svelte, types.ts, supabase.ts, etc.)
+			if (!isEdit) {
+				for (const [path, content] of buildTemplateFiles(job.slug)) {
+					existingFiles.set(path, content);
+				}
+			}
+
+			// ── 4. Choose system prompt ───────────────────────────────────────────
+			const systemPrompt = isEdit
+				? buildEditPrompt(existingFiles, job.supabase)
+				: buildNewPrompt(job.supabase);
+
+			// ── 5. Stream generation ──────────────────────────────────────────────
 			let full = '';
 			for await (const delta of streamChat({
 				apiKey: this.env.OPENROUTER_API_KEY,
@@ -170,7 +229,7 @@ export class RealtimeHub {
 				this.writeAll(live, this.sse('token', { content: delta.content }));
 			}
 
-			// ── 5. Parse FILE + PATCH blocks ──────────────────────────────────────
+			// ── 6. Parse FILE + PATCH blocks ──────────────────────────────────────
 			const { files: newFiles, patches } = parseOutput(full);
 			const finalFiles = new Map(existingFiles);
 
@@ -189,18 +248,25 @@ export class RealtimeHub {
 				}
 			}
 
-			// ── 6. Fallback: retry failed files with full-rewrite prompt ──────────
+			// ── 7. Fallback: retry failed files with current content as context ────
 			if (failedPaths.length > 0) {
+				// Include the current file contents so the AI can rewrite them correctly.
+				const failedFileBlocks = failedPaths
+					.map((p) => {
+						const content = finalFiles.get(p) ?? '';
+						return `=== FILE: ${p} ===\n${content}\n=== END FILE ===`;
+					})
+					.join('\n\n');
 				const retryPrompt =
-					`Rewrite these files in full (previous unified diff could not be applied):\n` +
-					failedPaths.join('\n') +
-					`\n\nOriginal request: ${job.prompt}`;
+					`A patch could not be applied. Rewrite ONLY the following files in full, ` +
+					`applying this change: ${job.prompt}\n\n` +
+					`Current content of files to rewrite:\n\n${failedFileBlocks}`;
 				let retryFull = '';
 				for await (const delta of streamChat({
 					apiKey: this.env.OPENROUTER_API_KEY,
 					model: job.model ?? DEFAULT_MODEL,
 					messages: [
-						{ role: 'system', content: PROMPT_NEW },
+						{ role: 'system', content: buildNewPrompt(job.supabase) },
 						{ role: 'user', content: retryPrompt }
 					]
 				})) {
@@ -211,7 +277,7 @@ export class RealtimeHub {
 				for (const f of retryFiles) finalFiles.set(f.path, f.content);
 			}
 
-			// ── 7. Persist to R2 + D1 ─────────────────────────────────────────────
+			// ── 8. Persist to R2 + D1 ─────────────────────────────────────────────
 			const ts = Date.now();
 			for (const [path, content] of finalFiles) {
 				const key = fileKey(job.projectId, job.version, path);
@@ -248,6 +314,21 @@ export class RealtimeHub {
 				input: estimateTokens(job.prompt) + estimateTokens(systemPrompt),
 				output: estimateTokens(full)
 			});
+
+			// ── 9. Auto-migrate Supabase DB if migration files were generated ──────
+			if (job.supabase?.accessToken && job.supabase?.projectRef) {
+				const migrationFiles = [...finalFiles.entries()]
+					.filter(([p]) => p.startsWith('supabase/migrations/') && p.endsWith('.sql'))
+					.sort(([a], [b]) => a.localeCompare(b));
+				if (migrationFiles.length > 0) {
+					const sql = migrationFiles.map(([, content]) => content).join('\n');
+					const migName = `builderpro_v${job.version}`;
+					const migResult = await runMigration(job.supabase.accessToken, job.supabase.projectRef, sql, migName);
+					if (!migResult.ok) {
+						console.warn(`[hub] migration failed (non-fatal): ${migResult.error}`);
+					}
+				}
+			}
 
 			await db
 				.update(generations)
@@ -318,7 +399,10 @@ export class RealtimeHub {
 		if (!project?.githubPagesUrl) return;
 
 		const [userRow] = await db
-			.select({ githubAccessToken: users.githubAccessToken, githubLogin: users.githubLogin })
+			.select({
+				githubAccessToken: users.githubAccessToken,
+				githubLogin: users.githubLogin
+			})
 			.from(users)
 			.where(eq(users.id, job.userId))
 			.limit(1);
@@ -374,5 +458,6 @@ export class RealtimeHub {
 				updatedAt: Date.now()
 			})
 			.where(eq(projects.id, job.projectId));
+
 	}
 }

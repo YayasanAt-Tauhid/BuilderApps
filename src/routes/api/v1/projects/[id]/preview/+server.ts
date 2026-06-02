@@ -5,10 +5,6 @@ import { requireOwnedProject, getEnv } from '$lib/server/context';
 import { generatedFiles } from '$lib/server/db/schema';
 import { getFileText } from '$lib/server/storage/r2';
 
-// Sandboxed frontend preview (PRD §4 — Should). Serves the generated HTML entry point
-// with local CSS/JS inlined, so a single-document preview renders with styling even though
-// only one document is served. This is NOT full-stack execution (ASSUMPTION-2).
-
 function isLocal(ref: string): boolean {
 	return !/^([a-z]+:)?\/\//i.test(ref) && !ref.startsWith('data:') && !ref.startsWith('#');
 }
@@ -17,7 +13,6 @@ function isLocal(ref: string): boolean {
 function inlineAssets(html: string, files: Map<string, string>): string {
 	let out = html;
 
-	// Resolve a referenced path to a stored file (by full path or basename).
 	const find = (ref: string): string | undefined => {
 		const clean = ref.replace(/^\.?\//, '').split(/[?#]/)[0];
 		if (files.has(clean)) return files.get(clean);
@@ -26,7 +21,6 @@ function inlineAssets(html: string, files: Map<string, string>): string {
 		return undefined;
 	};
 
-	// <link ... rel="stylesheet" ... href="..."> (href may come before or after rel)
 	out = out.replace(/<link\b[^>]*>/gi, (tag) => {
 		if (!/rel\s*=\s*["']?stylesheet/i.test(tag)) return tag;
 		const href = tag.match(/href\s*=\s*["']([^"']+)["']/i)?.[1];
@@ -35,7 +29,6 @@ function inlineAssets(html: string, files: Map<string, string>): string {
 		return css !== undefined ? `<style>\n${css}\n</style>` : tag;
 	});
 
-	// <script src="..."></script>
 	out = out.replace(
 		/<script\b([^>]*)\bsrc\s*=\s*["']([^"']+)["']([^>]*)>\s*<\/script>/gi,
 		(tag, _a, src) => {
@@ -46,6 +39,86 @@ function inlineAssets(html: string, files: Map<string, string>): string {
 	);
 
 	return out;
+}
+
+/** Detect if this looks like a SvelteKit project (has .svelte files or svelte.config.js). */
+function isSvelteKitProject(paths: string[]): boolean {
+	return paths.some(
+		(p) => p.endsWith('.svelte') || p === 'svelte.config.js' || p.startsWith('src/routes/')
+	);
+}
+
+/** Generate a preview page that explains the project needs a build step. */
+function buildkitNotice(projectName: string): string {
+	return `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <title>Preview — ${projectName}</title>
+  <style>
+    *{box-sizing:border-box;margin:0;padding:0}
+    body{font-family:system-ui,sans-serif;background:#f8fafc;color:#0f172a;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:1.5rem}
+    .card{background:#fff;border:1px solid #e2e8f0;border-radius:1.25rem;padding:2rem;max-width:520px;width:100%;box-shadow:0 4px 32px #0001}
+    .logo{font-size:2rem;margin-bottom:.75rem}
+    h1{font-size:1.15rem;font-weight:700;margin-bottom:.25rem}
+    .sub{color:#64748b;font-size:.875rem;margin-bottom:1.5rem}
+    .section{background:#f8fafc;border:1px solid #e2e8f0;border-radius:.75rem;padding:1rem;margin-bottom:.75rem}
+    .section h2{font-size:.8rem;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:#6366f1;margin-bottom:.5rem}
+    .steps{list-style:none;counter-reset:s;margin:0}
+    .steps li{counter-increment:s;padding:.4rem 0 .4rem 2rem;position:relative;font-size:.85rem;color:#475569;border-top:1px solid #f1f5f9}
+    .steps li:first-child{border-top:none}
+    .steps li::before{content:counter(s);position:absolute;left:0;top:.35rem;width:1.35rem;height:1.35rem;border-radius:50%;background:#6366f1;color:#fff;display:flex;align-items:center;justify-content:center;font-size:.65rem;font-weight:700}
+    code{background:#f1f5f9;padding:.15em .4em;border-radius:.3em;font-size:.8em;font-family:monospace;color:#0f172a}
+    .tag{display:inline-flex;align-items:center;gap:.3rem;border-radius:.4rem;padding:.25rem .6rem;font-size:.75rem;font-weight:600}
+    .green{background:#f0fdf4;color:#15803d;border:1px solid #bbf7d0}
+    .blue{background:#eff6ff;color:#1d4ed8;border:1px solid #bfdbfe}
+    .tags{display:flex;gap:.4rem;flex-wrap:wrap;margin-top:.75rem}
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="logo">🏗️</div>
+    <h1>${projectName} — SvelteKit + Supabase</h1>
+    <p class="sub">This project uses a full-stack framework and needs to be compiled before it can run. Follow the steps below to deploy.</p>
+
+    <div class="section">
+      <h2>1 — Setup Supabase</h2>
+      <ol class="steps">
+        <li>Buka <strong>supabase.com</strong> → buat project baru</li>
+        <li>Salin <code>Project URL</code> dan <code>anon public key</code> dari Settings → API</li>
+        <li>Buat tabel yang dibutuhkan di <strong>Table Editor</strong> (sesuai struktur di kode)</li>
+        <li>Tambahkan sebagai GitHub Secrets: <code>VITE_SUPABASE_URL</code> dan <code>VITE_SUPABASE_ANON_KEY</code></li>
+      </ol>
+    </div>
+
+    <div class="section">
+      <h2>2 — Deploy ke Cloudflare Pages</h2>
+      <ol class="steps">
+        <li>Klik <strong>Push to GitHub</strong> di halaman Files</li>
+        <li>Di GitHub repo → Settings → Secrets, tambahkan: <code>CLOUDFLARE_API_TOKEN</code>, <code>VITE_SUPABASE_URL</code>, <code>VITE_SUPABASE_ANON_KEY</code></li>
+        <li>GitHub Actions akan otomatis build + deploy ke Cloudflare Pages</li>
+        <li>URL live muncul di tab Actions dan Cloudflare dashboard</li>
+      </ol>
+    </div>
+
+    <div class="section">
+      <h2>3 — Jalankan lokal</h2>
+      <ol class="steps">
+        <li>Salin <code>.env.example</code> → <code>.env</code> lalu isi dengan kredensial Supabase</li>
+        <li>Jalankan: <code>pnpm install &amp;&amp; pnpm dev</code></li>
+      </ol>
+    </div>
+
+    <div class="tags">
+      <span class="tag green">✓ SvelteKit + TypeScript</span>
+      <span class="tag green">✓ Supabase Database</span>
+      <span class="tag blue">⚡ Cloudflare Pages</span>
+      <span class="tag blue">🚀 GitHub Actions CI/CD</span>
+    </div>
+  </div>
+</body>
+</html>`;
 }
 
 export const GET: RequestHandler = async (event) => {
@@ -65,7 +138,25 @@ export const GET: RequestHandler = async (event) => {
 		.from(generatedFiles)
 		.where(and(eq(generatedFiles.projectId, project.id), eq(generatedFiles.version, version)));
 
-	// Load text for the entry HTML plus any CSS/JS to inline (keep the blob set small).
+	const allPaths = rows.map((r) => r.path);
+
+	// SvelteKit project → show build-required notice (can't serve .svelte source directly).
+	if (isSvelteKitProject(allPaths)) {
+		return new Response(buildkitNotice(project.name), {
+			headers: {
+				'Content-Type': 'text/html; charset=utf-8',
+				'Cache-Control': 'no-store',
+				'Content-Security-Policy': [
+					'sandbox allow-scripts',
+					"default-src 'none'",
+					"style-src 'unsafe-inline'",
+					"script-src 'none'"
+				].join('; ')
+			}
+		});
+	}
+
+	// Legacy plain HTML project — inline assets and serve sandboxed.
 	const files = new Map<string, string>();
 	let entryPath: string | undefined;
 	for (const r of rows) {
@@ -89,8 +180,6 @@ export const GET: RequestHandler = async (event) => {
 		headers: {
 			'Content-Type': 'text/html; charset=utf-8',
 			'Cache-Control': 'no-store',
-			// Sandboxed (no same-origin: cannot touch the app), but inline CSS/JS and CDN
-			// assets are allowed so the generated page renders with styling.
 			'Content-Security-Policy': [
 				'sandbox allow-scripts allow-forms allow-popups',
 				"default-src 'none'",

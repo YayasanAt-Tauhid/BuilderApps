@@ -104,70 +104,45 @@ export async function pushFilesToRepo(
 		defaultBranch = repoCheck.data.default_branch;
 	}
 
-	// 2. Get current HEAD — if repo is empty (no commits yet), initialize via Contents API first.
+	// 2. Get current HEAD sha (or init via Contents API if repo is empty).
 	let parentSha: string | undefined;
 	const headResult = await githubRequest<{ object: { sha: string } }>(
-		token,
-		'GET',
-		`${repoPath}/git/refs/heads/${defaultBranch}`
+		token, 'GET', `${repoPath}/git/refs/heads/${defaultBranch}`
 	);
 	if (headResult.ok) {
 		parentSha = headResult.data.object.sha;
 	} else {
 		const initResult = await githubRequest<{ commit: { sha: string } }>(
-			token,
-			'PUT',
-			`${repoPath}/contents/.gitkeep`,
+			token, 'PUT', `${repoPath}/contents/.gitkeep`,
 			{ message: 'Initialize repository', content: 'Cg==' }
 		);
 		if (!initResult.ok) return { error: (initResult as { ok: false; message: string }).message };
 		parentSha = initResult.data.commit.sha;
 	}
 
-	// 3. Create a blob for every file (utf-8 encoding).
-	let blobs: { path: string; mode: '100644'; type: 'blob'; sha: string }[];
-	try {
-		blobs = await Promise.all(
-			files.map(async (f) => {
-				const result = await githubRequest<{ sha: string }>(
-					token,
-					'POST',
-					`${repoPath}/git/blobs`,
-					{ content: f.content, encoding: 'utf-8' }
-				);
-				if (!result.ok) throw new Error(`blob:${f.path}: ${result.message}`);
-				return { path: f.path, mode: '100644' as const, type: 'blob' as const, sha: result.data.sha };
-			})
-		);
-	} catch (e) {
-		return { error: e instanceof Error ? e.message : 'Blob creation failed' };
-	}
-
-	// 4. Create tree (no base_tree — replaces entire tree with generated files).
+	// 3. Create tree — pass file content directly (GitHub creates blobs internally, no pre-creation needed).
 	const treeResult = await githubRequest<{ sha: string }>(token, 'POST', `${repoPath}/git/trees`, {
-		tree: blobs
+		tree: files.map((f) => ({ path: f.path, mode: '100644', type: 'blob', content: f.content }))
 	});
 	if (!treeResult.ok) {
-		console.error(`[github/push] tree FAILED: ${treeResult.status} ${treeResult.message} owner=${owner} repo=${repoName}`);
-		return { error: `[step4-tree:${treeResult.status}] ${treeResult.message}` };
+		console.error(`[push] tree failed ${treeResult.status} ${treeResult.message} owner=${owner} repo=${repoName}`);
+		return { error: `[step3-tree:${treeResult.status}] ${treeResult.message}` };
 	}
 
-	// 5. Create commit.
+	// 4. Create commit.
 	const newCommit = await githubRequest<{ sha: string }>(token, 'POST', `${repoPath}/git/commits`, {
 		message: commitMessage,
 		tree: treeResult.data.sha,
 		parents: parentSha ? [parentSha] : []
 	});
-	if (!newCommit.ok) return { error: `[step5-commit] ${newCommit.message}` };
+	if (!newCommit.ok) return { error: `[step4-commit] ${newCommit.message}` };
 
-	// 6. Update branch ref (force to cleanly replace init commit if needed).
+	// 5. Update branch ref (force to cleanly replace any init commit).
 	const update = await githubRequest(
-		token,
-		'PATCH',
-		`${repoPath}/git/refs/heads/${defaultBranch}`,
+		token, 'PATCH', `${repoPath}/git/refs/heads/${defaultBranch}`,
 		{ sha: newCommit.data.sha, force: true }
 	);
-	if (!update.ok) return { error: `[step6-ref] ${(update as { ok: false; message: string }).message}` };
+	if (!update.ok) return { error: `[step5-ref] ${(update as { ok: false; message: string }).message}` };
 
 	return { repoUrl: `https://github.com/${owner}/${repoName}`, commitSha: newCommit.data.sha };
 }

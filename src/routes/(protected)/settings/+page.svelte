@@ -15,22 +15,12 @@
 	const githubConnected = $derived(page.url.searchParams.get('github_connected') === '1');
 	const supabaseError = $derived(page.url.searchParams.get('supabase_error'));
 	const supabaseJustConnected = $derived(page.url.searchParams.get('supabase_connected') === '1');
-	const cfError = $derived(page.url.searchParams.get('cf_error'));
-	const cfJustConnected = $derived(page.url.searchParams.get('cf_connected') === '1');
 
 	const supabaseErrorMessages: Record<string, string> = {
 		denied: 'Supabase access was denied.',
 		invalid: 'Invalid OAuth response.',
 		expired: 'OAuth session expired. Please try again.',
 		config: 'Supabase integration is not configured.',
-		token: 'Failed to obtain access token.'
-	};
-
-	const cfErrorMessages: Record<string, string> = {
-		denied: 'Cloudflare access was denied.',
-		invalid: 'Invalid OAuth response.',
-		expired: 'OAuth session expired. Please try again.',
-		config: 'Cloudflare integration is not configured.',
 		token: 'Failed to obtain access token.'
 	};
 
@@ -210,20 +200,5 @@
 	{/if}
 </section>
 
-<!-- Cloudflare -->
-<section class="rounded-2xl border bg-card p-6">
-	<div class="mb-4 flex items-center gap-2">
-		<svg class="size-5 text-orange-500" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-			<path d="M16.5 15.6l.5-1.6c.1-.2 0-.4-.1-.5s-.3-.2-.5-.3l-9.1-.1c-.1 0-.2 0-.2-.1 0-.1 0-.2.1-.2l.3-.9c0-.1.1-.2.2-.2l9.6-.1c1.4 0 2.4 1.3 2 2.7l-.6 2.1c-.1.3-.4.4-.6.4h-1.3c-.1 0-.2-.1-.2-.3l.4-1.1zM7.5 18.5l-.3 1.2c-.1.2 0 .4.1.5s.3.2.5.3l9.1.1c.1 0 .2 0 .2.1 0 .1 0 .2-.1.2l-.3.9c0 .1-.1.2-.2.2l-9.6.1C5.5 22 4.5 20.7 4.9 19.3l.6-2.1c.1-.3.4-.4.6-.4h1.7c.1 0 .2.1.2.3l-.5 1.4z"/>
-		</svg>
-		<h2 class="font-semibold">Cloudflare Pages</h2>
-		<span class="ml-auto rounded-full bg-green-500/15 px-2.5 py-0.5 text-xs font-medium text-green-700 dark:text-green-400">Ready</span>
-	</div>
-
-	<p class="text-sm text-muted-foreground">
-		Deploy ke Cloudflare Pages sudah siap — tidak perlu setup apapun.
-		Cukup <strong>Push ke GitHub</strong>, lalu GitHub Actions akan otomatis build dan deploy ke Cloudflare Pages. 🚀
-	</p>
-</section>
 
 </div>

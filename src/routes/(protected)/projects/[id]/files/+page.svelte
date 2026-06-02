@@ -22,11 +22,6 @@
 	let supabaseRef = $state(data.project.supabaseProjectRef ?? null);
 	let supabaseUrl = $state(data.project.supabaseUrl ?? null);
 
-	let deploying = $state(false);
-	let deployError = $state<string | null>(null);
-	let deployInfo = $state<string | null>(null);
-	let cfPagesUrl = $state(data.project.cfPagesUrl ?? null);
-
 	// Mobile tab: 'history' | 'files' | 'viewer'
 	let mobileTab = $state<'history' | 'files' | 'viewer'>('files');
 
@@ -85,30 +80,6 @@
 			hour: '2-digit',
 			minute: '2-digit'
 		});
-	}
-
-	async function deployToCloudflare() {
-		deploying = true;
-		deployError = null;
-		deployInfo = null;
-		try {
-			const res = await fetch(`/api/v1/projects/${data.project.id}/deploy`, { method: 'POST' });
-			if (res.ok) {
-				const json = (await res.json()) as { data: { url?: string; sveltekit?: boolean; message?: string; repoUrl?: string } };
-				if (json.data.sveltekit) {
-					deployInfo = json.data.message ?? 'Push to GitHub to deploy via GitHub Actions.';
-				} else if (json.data.url) {
-					cfPagesUrl = json.data.url;
-				}
-			} else {
-				const json = (await res.json()) as { error?: { message?: string } };
-				deployError = json.error?.message ?? 'Deploy failed.';
-			}
-		} catch {
-			deployError = 'Network error.';
-		} finally {
-			deploying = false;
-		}
 	}
 
 	async function open(file: { id: string; path: string }) {
@@ -233,44 +204,15 @@
 			</a>
 		{/if}
 
-		{#if data.cfPagesEnabled && data.files.length > 0 && isViewingLatest}
-			{#if cfPagesUrl}
-				<a href={cfPagesUrl} target="_blank" rel="noopener noreferrer"
-					class="shrink-0 flex items-center gap-1 rounded-lg border px-2.5 py-1.5 text-xs transition hover:bg-muted sm:px-3 sm:text-sm">
-					<span class="size-1.5 rounded-full bg-orange-500"></span>
-					Live
-				</a>
-			{/if}
-			<button onclick={deployToCloudflare} disabled={deploying}
-				class="shrink-0 inline-flex items-center gap-1.5 rounded-lg bg-orange-500 px-2.5 py-1.5 text-xs font-medium text-white transition hover:bg-orange-600 disabled:opacity-50 sm:px-3 sm:text-sm">
-				{#if deploying}
-					<span class="size-3 animate-spin rounded-full border-2 border-white border-t-transparent"></span>
-				{/if}
-				{deploying ? '…' : cfPagesUrl ? 'Redeploy' : 'Deploy'}
-			</button>
-		{/if}
 	</div>
 </div>
 
 <!-- Error banners -->
-{#each [deployError, syncError, restoreError].filter(Boolean) as err}
+{#each [syncError, restoreError].filter(Boolean) as err}
 	<div class="mb-3 rounded-xl border border-destructive/40 bg-destructive/10 px-4 py-3 text-sm text-destructive">
 		{err}
 	</div>
 {/each}
-
-<!-- SvelteKit deploy info -->
-{#if deployInfo}
-	<div class="mb-4 rounded-xl border border-blue-200 bg-blue-50 px-4 py-4 text-sm dark:border-blue-900 dark:bg-blue-950/40">
-		<div class="mb-2 flex items-center gap-2">
-			<svg xmlns="http://www.w3.org/2000/svg" class="size-4 text-blue-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg>
-			<p class="font-semibold text-blue-800 dark:text-blue-300">Deploy via GitHub Actions</p>
-		</div>
-		<p class="text-xs text-blue-700 dark:text-blue-400">
-			Klik <strong>Push</strong> — GitHub Actions akan otomatis build dan deploy ke Cloudflare Pages. Semua credentials sudah di-set otomatis. 🚀
-		</p>
-	</div>
-{/if}
 
 <!-- Supabase banner -->
 {#if data.supabaseConnected}

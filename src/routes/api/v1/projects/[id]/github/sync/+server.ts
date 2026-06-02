@@ -4,7 +4,7 @@ import { ok, errors } from '$lib/server/api';
 import { requireOwnedProject, getEnv } from '$lib/server/context';
 import { generatedFiles, projects, users } from '$lib/server/db/schema';
 import { getFileText } from '$lib/server/storage/r2';
-import { pushFilesToRepo, enableGithubPages, registerWebhook, setRepoSecrets } from '$lib/server/github';
+import { pushFilesToRepo, enableGithubPages, registerWebhook } from '$lib/server/github';
 
 // Push the latest generated files to a GitHub repo named after the project slug.
 export const POST: RequestHandler = async (event) => {
@@ -14,15 +14,13 @@ export const POST: RequestHandler = async (event) => {
 	const rows = await db
 		.select({
 			githubAccessToken: users.githubAccessToken,
-			githubLogin: users.githubLogin,
-			supabaseAccessToken: users.supabaseAccessToken,
-			cloudflareAccessToken: users.cloudflareAccessToken
+			githubLogin: users.githubLogin
 		})
 		.from(users)
 		.where(eq(users.id, user.id))
 		.limit(1);
 
-	const { githubAccessToken, githubLogin, supabaseAccessToken, cloudflareAccessToken } = rows[0] ?? {};
+	const { githubAccessToken, githubLogin } = rows[0] ?? {};
 	if (!githubAccessToken || !githubLogin) {
 		return errors.forbidden();
 	}
@@ -91,21 +89,6 @@ export const POST: RequestHandler = async (event) => {
 			updatedAt: Date.now()
 		})
 		.where(eq(projects.id, project.id));
-
-	// Auto-set GitHub Actions secrets so CI can run migrations + build without manual config.
-	const secrets: Record<string, string> = {};
-	if (project.supabaseUrl) secrets['VITE_SUPABASE_URL'] = project.supabaseUrl;
-	if (project.supabaseAnonKey) secrets['VITE_SUPABASE_ANON_KEY'] = project.supabaseAnonKey;
-	if (supabaseAccessToken) secrets['SUPABASE_ACCESS_TOKEN'] = supabaseAccessToken;
-
-	// Cloudflare: user's own token takes priority; fall back to BuilderPro admin token.
-	const cfToken = cloudflareAccessToken || env.CLOUDFLARE_PAGES_API_TOKEN || null;
-	if (cfToken) secrets['CLOUDFLARE_API_TOKEN'] = cfToken;
-	if (env.CLOUDFLARE_ACCOUNT_ID) secrets['CLOUDFLARE_ACCOUNT_ID'] = env.CLOUDFLARE_ACCOUNT_ID;
-
-	if (Object.keys(secrets).length > 0) {
-		setRepoSecrets(githubAccessToken!, githubLogin!, project.slug, secrets).catch(() => {});
-	}
 
 	return ok({ repoUrl: result.repoUrl, pagesUrl, syncedVersion: version, commitSha: result.commitSha });
 };

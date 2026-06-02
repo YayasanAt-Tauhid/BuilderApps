@@ -88,52 +88,5 @@ VITE_SUPABASE_ANON_KEY=your-anon-key
 `
 	);
 
-	files.set(
-		'wrangler.toml',
-		`name = "${slug}"
-compatibility_date = "2025-01-01"
-compatibility_flags = ["nodejs_compat"]
-pages_build_output_dir = ".svelte-kit/cloudflare"
-`
-	);
-
-	files.set(
-		'.github/workflows/deploy.yml',
-		`name: Deploy to Cloudflare Pages
-on:
-  push:
-    branches: [main]
-jobs:
-  deploy:
-    runs-on: ubuntu-latest
-    env:
-      CF_TOKEN: \${{ secrets.CLOUDFLARE_API_TOKEN }}
-    steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-        with: { version: 9 }
-      - uses: actions/setup-node@v4
-        with: { node-version: 20, cache: pnpm }
-      - run: pnpm install
-      - name: Apply Supabase migrations
-        run: npx supabase db push
-        env:
-          SUPABASE_ACCESS_TOKEN: \${{ secrets.SUPABASE_ACCESS_TOKEN }}
-        continue-on-error: true
-      - run: pnpm build
-        env:
-          VITE_SUPABASE_URL: \${{ secrets.VITE_SUPABASE_URL }}
-          VITE_SUPABASE_ANON_KEY: \${{ secrets.VITE_SUPABASE_ANON_KEY }}
-      - name: Deploy to Cloudflare Pages
-        if: \${{ env.CF_TOKEN != '' }}
-        uses: cloudflare/wrangler-action@v3
-        with:
-          apiToken: \${{ env.CF_TOKEN }}
-          command: pages deploy .svelte-kit/cloudflare --project-name=${slug}
-        env:
-          CLOUDFLARE_ACCOUNT_ID: \${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-`
-	);
-
 	return files;
 }

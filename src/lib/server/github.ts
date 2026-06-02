@@ -137,43 +137,54 @@ export async function pushFilesToRepo(
 	if (!headResult.ok) return { error: `[step2-head] ${headResult.message}` };
 	const headCommitSha = headResult.data.object.sha;
 
-	// 3. Create blobs for all files (base64-encoded for UTF-8 safety).
-	const blobResults = await Promise.all(
-		files.map((f) =>
-			githubRequest<{ sha: string }>(token, 'POST', `${repoPath}/git/blobs`, {
-				content: btoa(unescape(encodeURIComponent(f.content))),
-				encoding: 'base64'
-			}).then((r) => (r.ok ? { path: f.path, sha: r.data.sha } : null))
-		)
-	);
-	const blobs = blobResults.filter((b): b is { path: string; sha: string } => b !== null);
-	if (blobs.length !== files.length) return { error: '[step3-blob] Failed to create one or more blobs.' };
+	// 3. Push all files via GraphQL createCommitOnBranch (atomic, no blob/tree steps needed).
+	const additions = files.map((f) => ({
+		path: f.path,
+		contents: btoa(unescape(encodeURIComponent(f.content)))
+	}));
 
-	// 4. Create tree (no base_tree — replace entire tree with generated files only).
-	const treeResult = await githubRequest<{ sha: string }>(token, 'POST', `${repoPath}/git/trees`, {
-		tree: blobs.map((b) => ({ path: b.path, mode: '100644', type: 'blob', sha: b.sha }))
+	const gqlRes = await fetch('https://api.github.com/graphql', {
+		method: 'POST',
+		headers: {
+			Authorization: `Bearer ${token}`,
+			'Content-Type': 'application/json',
+			'User-Agent': USER_AGENT
+		},
+		body: JSON.stringify({
+			query: `mutation($input: CreateCommitOnBranchInput!) {
+				createCommitOnBranch(input: $input) { commit { oid } }
+			}`,
+			variables: {
+				input: {
+					branch: { repositoryNameWithOwner: `${owner}/${repoName}`, branchName: defaultBranch },
+					message: { headline: commitMessage },
+					fileChanges: { additions },
+					expectedHeadOid: headCommitSha
+				}
+			}
+		})
 	});
-	if (!treeResult.ok) return { error: `[step4-tree] ${treeResult.message}` };
 
-	// 5. Create commit.
-	const commitResult = await githubRequest<{ sha: string }>(
-		token,
-		'POST',
-		`${repoPath}/git/commits`,
-		{ message: commitMessage, tree: treeResult.data.sha, parents: [headCommitSha] }
-	);
-	if (!commitResult.ok) return { error: `[step5-commit] ${commitResult.message}` };
+	if (!gqlRes.ok) {
+		const txt = await gqlRes.text().catch(() => gqlRes.statusText);
+		return { error: `[step3-gql:${gqlRes.status}] ${txt.slice(0, 300)}` };
+	}
 
-	// 6. Update branch ref.
-	const refResult = await githubRequest(
-		token,
-		'PATCH',
-		`${repoPath}/git/refs/heads/${defaultBranch}`,
-		{ sha: commitResult.data.sha, force: true }
-	);
-	if (!refResult.ok) return { error: `[step6-ref] ${(refResult as { ok: false; message: string }).message}` };
+	const gqlData = (await gqlRes.json()) as {
+		data?: { createCommitOnBranch?: { commit?: { oid: string } } };
+		errors?: { message: string }[];
+	};
 
-	return { repoUrl: `https://github.com/${owner}/${repoName}`, commitSha: commitResult.data.sha };
+	if (gqlData.errors?.length) {
+		const msg = gqlData.errors.map((e) => e.message).join('; ');
+		console.error(`[github/push] GraphQL error: ${msg} | owner=${owner} repo=${repoName} scopes=${scopes}`);
+		return { error: `[step3-gql-err] ${msg}` };
+	}
+
+	const commitSha = gqlData.data?.createCommitOnBranch?.commit?.oid;
+	if (!commitSha) return { error: '[step3-gql-nooid] No commit oid returned' };
+
+	return { repoUrl: `https://github.com/${owner}/${repoName}`, commitSha };
 }
 
 /**

@@ -86,6 +86,25 @@ export async function pushFilesToRepo(
 ): Promise<{ repoUrl: string; commitSha: string } | { error: string }> {
 	const repoPath = `/repos/${owner}/${repoName}`;
 
+	// Validate token and check scopes upfront.
+	const userRes = await fetch(`${GITHUB_API}/user`, {
+		headers: {
+			Authorization: `Bearer ${token}`,
+			Accept: 'application/vnd.github+json',
+			'X-GitHub-Api-Version': '2022-11-28',
+			'User-Agent': USER_AGENT
+		}
+	});
+	if (!userRes.ok) {
+		return { error: `Token tidak valid (${userRes.status}). Buka Settings → GitHub → Disconnect, lalu Connect ulang.` };
+	}
+	const scopes = userRes.headers.get('x-oauth-scopes') ?? '';
+	const scopeList = scopes.split(',').map((s) => s.trim()).filter(Boolean);
+	if (!scopeList.includes('repo') && !scopeList.includes('public_repo')) {
+		return { error: `Token tidak punya scope repo/public_repo (scopes: "${scopes}"). Buka Settings → GitHub → Disconnect, lalu Connect ulang.` };
+	}
+	console.log(`[push] token ok, scopes="${scopes}", owner=${owner}, repo=${repoName}, files=${files.length}`);
+
 	// 1. Ensure repo exists — create with auto_init so git storage is ready.
 	let defaultBranch: string;
 	const repoCheck = await githubRequest<{ default_branch: string }>(token, 'GET', repoPath);
@@ -125,8 +144,9 @@ export async function pushFilesToRepo(
 		tree: files.map((f) => ({ path: f.path, mode: '100644', type: 'blob', content: f.content }))
 	});
 	if (!treeResult.ok) {
-		console.error(`[push] tree failed ${treeResult.status} ${treeResult.message} owner=${owner} repo=${repoName}`);
-		return { error: `[step3-tree:${treeResult.status}] ${treeResult.message}` };
+		const url = `${GITHUB_API}${repoPath}/git/trees`;
+		console.error(`[push] tree POST ${url} → ${treeResult.status} "${treeResult.message}" scopes="${scopes}" owner=${owner} repo=${repoName} files=${files.length}`);
+		return { error: `[step3-tree:${treeResult.status}] ${treeResult.message} (scopes:${scopes || 'none'})` };
 	}
 
 	// 4. Create commit.

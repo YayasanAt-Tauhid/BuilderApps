@@ -118,14 +118,14 @@ export async function pushFilesToRepo(
 		defaultBranch = repoCheck.data.default_branch;
 	}
 
-	// 2. Get HEAD sha of the default branch.
+	// 2. Get HEAD commit sha of the default branch.
 	const headResult = await githubRequest<{ object: { sha: string } }>(
 		token,
 		'GET',
 		`${repoPath}/git/refs/heads/${defaultBranch}`
 	);
-	if (!headResult.ok) return { error: headResult.message };
-	const headSha = headResult.data.object.sha;
+	if (!headResult.ok) return { error: `[step2-head] ${headResult.message}` };
+	const headCommitSha = headResult.data.object.sha;
 
 	// 3. Create blobs for all files (base64-encoded for UTF-8 safety).
 	const blobResults = await Promise.all(
@@ -137,23 +137,22 @@ export async function pushFilesToRepo(
 		)
 	);
 	const blobs = blobResults.filter((b): b is { path: string; sha: string } => b !== null);
-	if (blobs.length !== files.length) return { error: 'Failed to create one or more blobs.' };
+	if (blobs.length !== files.length) return { error: '[step3-blob] Failed to create one or more blobs.' };
 
-	// 4. Create tree.
+	// 4. Create tree (no base_tree — replace entire tree with generated files only).
 	const treeResult = await githubRequest<{ sha: string }>(token, 'POST', `${repoPath}/git/trees`, {
-		base_tree: headSha,
 		tree: blobs.map((b) => ({ path: b.path, mode: '100644', type: 'blob', sha: b.sha }))
 	});
-	if (!treeResult.ok) return { error: treeResult.message };
+	if (!treeResult.ok) return { error: `[step4-tree] ${treeResult.message}` };
 
 	// 5. Create commit.
 	const commitResult = await githubRequest<{ sha: string }>(
 		token,
 		'POST',
 		`${repoPath}/git/commits`,
-		{ message: commitMessage, tree: treeResult.data.sha, parents: [headSha] }
+		{ message: commitMessage, tree: treeResult.data.sha, parents: [headCommitSha] }
 	);
-	if (!commitResult.ok) return { error: commitResult.message };
+	if (!commitResult.ok) return { error: `[step5-commit] ${commitResult.message}` };
 
 	// 6. Update branch ref.
 	const refResult = await githubRequest(
@@ -162,7 +161,7 @@ export async function pushFilesToRepo(
 		`${repoPath}/git/refs/heads/${defaultBranch}`,
 		{ sha: commitResult.data.sha, force: true }
 	);
-	if (!refResult.ok) return { error: (refResult as { ok: false; message: string }).message };
+	if (!refResult.ok) return { error: `[step6-ref] ${(refResult as { ok: false; message: string }).message}` };
 
 	return { repoUrl: `https://github.com/${owner}/${repoName}`, commitSha: commitResult.data.sha };
 }

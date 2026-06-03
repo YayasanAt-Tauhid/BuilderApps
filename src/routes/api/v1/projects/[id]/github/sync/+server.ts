@@ -130,6 +130,16 @@ export const POST: RequestHandler = async (event) => {
 		syncedVersion: version,
 		commitSha: result.commitSha,
 		deploySecretsSet: failedSecrets.length === 0,
-		failedSecrets
+		failedSecrets,
+		_debug: {
+			secretsAttempted: Object.keys(deploySecrets),
+			envPresent: {
+				R2_ACCESS_KEY_ID: env.R2_ACCESS_KEY_ID ? `len=${env.R2_ACCESS_KEY_ID.length}` : 'MISSING',
+				R2_SECRET_ACCESS_KEY: env.R2_SECRET_ACCESS_KEY ? `len=${env.R2_SECRET_ACCESS_KEY.length}` : 'MISSING',
+				CLOUDFLARE_ACCOUNT_ID: env.CLOUDFLARE_ACCOUNT_ID || 'MISSING',
+				APP_URL: env.APP_URL || 'MISSING',
+				BUILDERPRO_DEPLOY_SECRET: env.BUILDERPRO_DEPLOY_SECRET ? 'set' : 'MISSING',
+			}
+		}
 	});
 };

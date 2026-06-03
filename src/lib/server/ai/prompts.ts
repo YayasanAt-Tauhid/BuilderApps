@@ -8,7 +8,7 @@ export const PROMPT_NEW = `You are BuilderPro, an expert full-stack engineer. Bu
 These boilerplate files are ALREADY CREATED — do NOT output them:
   package.json, svelte.config.js, vite.config.ts, tsconfig.json,
   src/app.html, src/app.css, src/routes/+layout.svelte,
-  .env.example, .github/workflows/deploy.yml
+  .env.example, pnpm-workspace.yaml, .github/workflows/deploy.yml
 
 Output ONLY app-specific files using this format (no markdown code fences):
 === FILE: relative/path/to/file.ext ===

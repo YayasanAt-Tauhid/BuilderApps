@@ -94,6 +94,14 @@ VITE_SUPABASE_ANON_KEY=your-anon-key
 `
 	);
 
+	// pnpm 11 blocks build scripts by default — explicitly allow esbuild (needed by vite).
+	files.set(
+		'pnpm-workspace.yaml',
+		`onlyBuiltDependencies:
+  - esbuild
+`
+	);
+
 	// GitHub Actions workflow: build → upload dist/ to R2 → notify BuilderPro.
 	// Secrets are auto-injected by BuilderPro when the project is synced to GitHub.
 	files.set(

@@ -98,6 +98,15 @@ export const POST: RequestHandler = async (event) => {
 	if (project.supabaseUrl) deploySecrets['VITE_SUPABASE_URL'] = project.supabaseUrl;
 	if (project.supabaseAnonKey) deploySecrets['VITE_SUPABASE_ANON_KEY'] = project.supabaseAnonKey;
 
+	console.log('[github/sync] deploySecrets keys:', Object.keys(deploySecrets));
+	console.log('[github/sync] env check:', {
+		R2_ACCESS_KEY_ID: env.R2_ACCESS_KEY_ID ? `set(${env.R2_ACCESS_KEY_ID.length})` : 'MISSING',
+		R2_SECRET_ACCESS_KEY: env.R2_SECRET_ACCESS_KEY ? `set(${env.R2_SECRET_ACCESS_KEY.length})` : 'MISSING',
+		CLOUDFLARE_ACCOUNT_ID: env.CLOUDFLARE_ACCOUNT_ID ? `set(${env.CLOUDFLARE_ACCOUNT_ID.length})` : 'MISSING',
+		APP_URL: env.APP_URL || 'MISSING',
+		BUILDERPRO_DEPLOY_SECRET: env.BUILDERPRO_DEPLOY_SECRET ? 'set' : 'MISSING',
+	});
+
 	const failedSecrets = Object.keys(deploySecrets).length > 0
 		? await setRepoSecrets(githubAccessToken, githubLogin, project.slug, deploySecrets)
 		: [];

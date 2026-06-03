@@ -5,6 +5,7 @@ import { requireOwnedProject, getEnv } from '$lib/server/context';
 import { generatedFiles, projects, users } from '$lib/server/db/schema';
 import { getFileText } from '$lib/server/storage/r2';
 import { pushFilesToRepo, registerWebhook, setRepoSecrets } from '$lib/server/github';
+import { buildTemplateFiles } from '$lib/server/ai/templates';
 
 // Push the latest generated files to a GitHub repo named after the project slug.
 export const POST: RequestHandler = async (event) => {
@@ -47,6 +48,15 @@ export const POST: RequestHandler = async (event) => {
 			content: (await getFileText(env.BUCKET, f.r2Key)) ?? ''
 		}))
 	);
+
+	// Always inject the latest deploy.yml from template — overrides any stale version in R2.
+	const latestTemplate = buildTemplateFiles(project.slug);
+	const latestDeployYml = latestTemplate.get('.github/workflows/deploy.yml');
+	if (latestDeployYml) {
+		const idx = fileContents.findIndex((f) => f.path === '.github/workflows/deploy.yml');
+		if (idx >= 0) fileContents[idx].content = latestDeployYml;
+		else fileContents.push({ path: '.github/workflows/deploy.yml', content: latestDeployYml });
+	}
 
 	const result = await pushFilesToRepo(
 		githubAccessToken,

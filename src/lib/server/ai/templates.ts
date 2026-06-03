@@ -12,7 +12,9 @@ export function buildTemplateFiles(slug: string): Map<string, string> {
 			{
 				name: slug,
 				private: true,
+				type: 'module',
 				scripts: {
+					prepare: 'svelte-kit sync || echo ""',
 					dev: 'vite dev',
 					build: 'vite build',
 					preview: 'vite preview'

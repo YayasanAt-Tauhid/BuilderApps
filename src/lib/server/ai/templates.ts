@@ -127,7 +127,9 @@ jobs:
           node-version: '22'
 
       - name: Install dependencies
-        run: pnpm install --no-frozen-lockfile
+        run: |
+          printf 'onlyBuiltDependencies:\\n  - esbuild\\n' > pnpm-workspace.yaml
+          pnpm install --no-frozen-lockfile
 
       - name: Build
         run: pnpm build

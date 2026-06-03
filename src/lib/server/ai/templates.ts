@@ -118,21 +118,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: pnpm/action-setup@v4
-        with:
-          version: latest
-
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
 
       - name: Install dependencies
-        run: |
-          printf 'onlyBuiltDependencies:\\n  - esbuild\\n' > pnpm-workspace.yaml
-          pnpm install --no-frozen-lockfile
+        run: npm install
 
       - name: Build
-        run: pnpm build
+        run: npm run build
         env:
           VITE_SUPABASE_URL: \${{ secrets.VITE_SUPABASE_URL }}
           VITE_SUPABASE_ANON_KEY: \${{ secrets.VITE_SUPABASE_ANON_KEY }}

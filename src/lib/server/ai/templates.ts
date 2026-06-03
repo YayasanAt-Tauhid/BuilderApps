@@ -140,14 +140,13 @@ jobs:
 
       - name: Upload dist to Cloudflare R2
         run: |
-          aws s3 sync dist/ "s3://\${CF_R2_BUCKET}/published/\${PROJECT_ID}/" \\
+          aws s3 sync dist/ "s3://builderpro-files/published/\${PROJECT_ID}/" \\
             --endpoint-url "https://2f85aafa98f3148b77205259e5d59ce6.r2.cloudflarestorage.com" \\
             --delete --no-progress
         env:
           AWS_ACCESS_KEY_ID: \${{ secrets.CF_R2_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: \${{ secrets.CF_R2_SECRET_ACCESS_KEY }}
           AWS_DEFAULT_REGION: auto
-          CF_R2_BUCKET: \${{ secrets.CF_R2_BUCKET_NAME }}
           PROJECT_ID: \${{ secrets.PROJECT_ID }}
 
       - name: Notify BuilderPro

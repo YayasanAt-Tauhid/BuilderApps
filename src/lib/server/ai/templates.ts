@@ -40,12 +40,15 @@ export function buildTemplateFiles(slug: string): Map<string, string> {
 
 	// adapter-static: outputs to dist/ — served directly from Cloudflare R2.
 	// fallback: 'index.html' enables SPA-style client-side routing.
+	// BASE_PATH is injected at CI build time so asset URLs are correct when
+	// served under /apps/{slug}/ rather than the site root.
 	files.set(
 		'svelte.config.js',
 		`import adapter from '@sveltejs/adapter-static';
 export default {
   kit: {
-    adapter: adapter({ pages: 'dist', assets: 'dist', fallback: 'index.html' })
+    adapter: adapter({ pages: 'dist', assets: 'dist', fallback: 'index.html' }),
+    paths: { base: process.env.BASE_PATH || '' }
   }
 };
 `
@@ -132,6 +135,7 @@ jobs:
         env:
           VITE_SUPABASE_URL: \${{ secrets.VITE_SUPABASE_URL }}
           VITE_SUPABASE_ANON_KEY: \${{ secrets.VITE_SUPABASE_ANON_KEY }}
+          BASE_PATH: /apps/\${{ secrets.PROJECT_SLUG }}
 
       - name: Upload dist to Cloudflare R2
         run: |

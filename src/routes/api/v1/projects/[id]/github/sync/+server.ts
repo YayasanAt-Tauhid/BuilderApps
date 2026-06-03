@@ -92,6 +92,7 @@ export const POST: RequestHandler = async (event) => {
 	if (env.R2_SECRET_ACCESS_KEY) deploySecrets['CF_R2_SECRET_ACCESS_KEY'] = env.R2_SECRET_ACCESS_KEY;
 	if (env.R2_BUCKET_NAME) deploySecrets['CF_R2_BUCKET_NAME'] = env.R2_BUCKET_NAME;
 	deploySecrets['PROJECT_ID'] = project.id;
+	deploySecrets['PROJECT_SLUG'] = project.slug;
 	if (env.APP_URL) deploySecrets['BUILDERPRO_WEBHOOK_URL'] = `${env.APP_URL}/api/v1/webhooks/build-complete`;
 	if (env.BUILDERPRO_DEPLOY_SECRET) deploySecrets['BUILDERPRO_DEPLOY_SECRET'] = env.BUILDERPRO_DEPLOY_SECRET;
 	if (project.supabaseUrl) deploySecrets['VITE_SUPABASE_URL'] = project.supabaseUrl;
